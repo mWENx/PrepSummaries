@@ -1,5 +1,5 @@
 .env
 secret.txt
 __pycache__
-desktop_frontend/assets
-desktop_frontend/node_modules
+desktop_frontend/assets/
+desktop_frontend/node_modules/
