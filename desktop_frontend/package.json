@@ -1,0 +1,14 @@
+{
+  "name": "prep-summaries-desktop-frontend",
+  "version": "0.1.0",
+  "description": "Basic desktop frontend for listing generated files.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:alt": "electron . --alt-ui",
+    "start:simple": "electron . --simple-ui"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7"
+  }
+}

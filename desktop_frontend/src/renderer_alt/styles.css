@@ -1,0 +1,171 @@
+:root {
+  --bg: #f3f7f9;
+  --panel: #ffffff;
+  --text: #1e2934;
+  --muted: #5f6f7d;
+  --line: #d6e0e8;
+  --accent: #0b6aa2;
+  --accent-strong: #074f78;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  font-family: "Avenir Next", "Segoe UI", -apple-system, sans-serif;
+  background: linear-gradient(145deg, #eff6fb 0%, var(--bg) 45%, #e9f0f4 100%);
+}
+
+.app-shell {
+  max-width: 1080px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.9rem;
+}
+
+.header p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+}
+
+.add-btn {
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  padding: 0.7rem 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.add-btn:hover {
+  background: var(--accent-strong);
+}
+
+.excel-panel {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 0.35rem 0.75rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.label {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.updated {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.list-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.list-head,
+.file-row {
+  display: grid;
+  grid-template-columns: 1fr 220px 120px;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+}
+
+.list-head {
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+  border-bottom: 1px solid var(--line);
+}
+
+.file-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file-row {
+  border-bottom: 1px solid #edf3f7;
+  cursor: pointer;
+}
+
+.file-row:last-child {
+  border-bottom: none;
+}
+
+.file-row:hover {
+  background: #f8fcff;
+}
+
+.file-name {
+  color: var(--accent);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty,
+.error {
+  padding: 1rem;
+  color: var(--muted);
+}
+
+.error {
+  color: #ad2020;
+}
+
+@media (max-width: 780px) {
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .excel-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .updated {
+    grid-column: 1;
+  }
+
+  .list-head {
+    display: none;
+  }
+
+  .file-row {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}

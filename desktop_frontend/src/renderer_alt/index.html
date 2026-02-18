@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Generated Files + Excel Source</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="header">
+        <div>
+          <h1>Generated Files</h1>
+          <p>Open past outputs and set the Excel source for document generation.</p>
+        </div>
+        <button id="add-excel-btn" class="add-btn" type="button">Add Excel File</button>
+      </header>
+
+      <section class="excel-panel" id="excel-panel">
+        <span class="label">Current Excel source:</span>
+        <span id="excel-path" class="value">None selected.</span>
+        <span id="excel-updated" class="updated"></span>
+      </section>
+
+      <section class="list-panel">
+        <div class="list-head">
+          <span>Name</span>
+          <span>Last Modified</span>
+          <span>Size</span>
+        </div>
+        <ul id="file-list" class="file-list"></ul>
+      </section>
+    </main>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>

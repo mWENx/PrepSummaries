@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Generate Briefing</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <h1>Generate Briefing</h1>
+
+      <section class="row-group">
+        <label>Excel source</label>
+        <div class="row">
+          <button id="upload-excel" type="button">Upload Excel</button>
+          <button id="use-last-excel" type="button">Use Last Excel</button>
+        </div>
+        <p id="excel-value" class="value">No Excel selected.</p>
+      </section>
+
+      <section class="row-group">
+        <label for="person-input">Person name</label>
+        <div class="row">
+          <input id="person-input" type="text" placeholder="Enter person name" />
+          <button id="enter-btn" type="button">Enter</button>
+        </div>
+      </section>
+
+      <section class="row-group">
+        <label>Save location</label>
+        <div class="row">
+          <button id="choose-save" type="button">Choose Folder</button>
+        </div>
+        <p id="save-value" class="value">No save folder selected.</p>
+      </section>
+
+      <p id="status" class="status"></p>
+    </main>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>
