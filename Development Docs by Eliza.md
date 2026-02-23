@@ -104,6 +104,56 @@
 5. Back to testing. Our frontend works but no other functionality yet 
 6. Prompt claude to add interaction with file systems 
 
+   * It was already added for the other systems, just had to modify entitlement files for mac
+
+```
+⏺ Let me read the relevant files first.
+
+⏺ Searched for 1 pattern, read 2 files (ctrl+o to expand)
+
+⏺ The file_picker package is already in pubspec.yaml and the picker methods are already wired up. Let me check if macOS entitlements are configured correctly, since that's the most common reason file pickers silently fail on macOS.
+
+⏺ Searched for 2 patterns, read 2 files (ctrl+o to expand)
+
+⏺ Found the problem. The app is sandboxed but missing the com.apple.security.files.user-selected.read-write entitlement. Without it, macOS's sandbox blocks file picker access entirely — the dialog either never opens or silently returns nothing.
+
+  I need to add this to both entitlement files:
+
+⏺ Update(nps_app/macos/Runner/DebugProfile.entitlements)
+  ⎿  Added 2 lines
+       8    <true/>
+       9    <key>com.apple.security.network.server</key>
+      10    <true/>
+      11 +  <key>com.apple.security.files.user-selected.read-write</key>  
+      12 +  <true/>                                                           
+      13  </dict>
+      14  </plist>
+
+⏺ Update(nps_app/macos/Runner/Release.entitlements)
+  ⎿  Added 2 lines
+       4  <dict>
+       5    <key>com.apple.security.app-sandbox</key>
+       6    <true/>
+       7 +  <key>com.apple.security.files.user-selected.read-write</key>                8 +  <true/>                                                                    9  </dict>
+      10  </plist>
+
+⏺ That's the only fix needed. The buttons (_pickExcelFile, _useLastFile, _pickOutputDirectory) were already fully wired — they just couldn't open dialogs because macOS's sandbox was blocking file access.
+
+  What changed:
+  - DebugProfile.entitlements — added com.apple.security.files.user-selected.read-write
+  - Release.entitlements — added com.apple.security.files.user-selected.read-write
+
+  This entitlement grants the app permission to read/write any file the user explicitly selects through an Open or Save panel, which is exactly what FilePicker.platform.pickFiles() and getDirectoryPath() use.
+
+  Rebuild and all three interactive buttons (Upload Excel, Use Last File, Browse Folder) will work:
+
+  cd nps_app && flutter run -d macos
+```
+
+7. Asked claude to migrate the python file's functionality over 
+
+* In progress 
+
 ### Misc. 
 
 #### Getting this to repo

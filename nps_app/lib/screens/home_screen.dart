@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import '../services/prefs_service.dart';
+import '../services/generator_service.dart';
 import 'excel_viewer_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -17,26 +18,36 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _lastSavedPath;
   String? _outputDir;
   final _nameController = TextEditingController();
+  final _apiKeyController = TextEditingController();
+
   bool _isGenerating = false;
+  String _statusMessage = '';
 
   @override
   void initState() {
     super.initState();
-    _loadLastPath();
+    _apiKeyController.addListener(() => setState(() {})); // keeps badge in sync
+    _loadPrefs();
   }
 
   @override
   void dispose() {
     _nameController.dispose();
+    _apiKeyController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadLastPath() async {
+  Future<void> _loadPrefs() async {
     final path = await PrefsService.getLastExcelPath();
-    if (path != null && File(path).existsSync()) {
-      setState(() => _lastSavedPath = path);
-    }
+    final key = await PrefsService.getApiKey();
+    if (!mounted) return;
+    setState(() {
+      if (path != null && File(path).existsSync()) _lastSavedPath = path;
+      if (key != null) _apiKeyController.text = key;
+    });
   }
+
+  // ── File pickers ──────────────────────────────────────────────────────────
 
   Future<void> _pickExcelFile() async {
     final result = await FilePicker.platform.pickFiles(
@@ -54,17 +65,29 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _useLastFile() {
-    setState(() => _excelPath = _lastSavedPath);
+  /// Tries to use the saved path, but detects sandbox permission loss and
+  /// prompts the user to re-pick if we can no longer access the file.
+  Future<void> _useLastFile() async {
+    if (_lastSavedPath == null) return;
+    try {
+      // Quick open-and-close to verify we still have read permission
+      File(_lastSavedPath!).openSync().closeSync();
+      setState(() => _excelPath = _lastSavedPath);
+    } on FileSystemException {
+      _showSnack(
+        'Cannot access the previous file — macOS sandbox requires re-selecting it.',
+        duration: 5,
+      );
+      await PrefsService.clearLastExcelPath();
+      setState(() => _lastSavedPath = null);
+    }
   }
 
   Future<void> _pickOutputDirectory() async {
     final dir = await FilePicker.platform.getDirectoryPath(
       dialogTitle: 'Select Output Folder',
     );
-    if (dir != null) {
-      setState(() => _outputDir = dir);
-    }
+    if (dir != null) setState(() => _outputDir = dir);
   }
 
   void _viewExcel() {
@@ -77,33 +100,142 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ── API key dialog ────────────────────────────────────────────────────────
+
+  void _showApiKeyDialog() {
+    bool obscured = true;
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.vpn_key_outlined,
+                  color: Theme.of(ctx).colorScheme.primary),
+              const SizedBox(width: 8),
+              const Text('OpenAI API Key'),
+            ],
+          ),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: _apiKeyController,
+                  obscureText: obscured,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: 'sk-…',
+                    suffixIcon: IconButton(
+                      icon: Icon(obscured
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined),
+                      onPressed: () =>
+                          setDialogState(() => obscured = !obscured),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(Icons.lock_outline,
+                        size: 14,
+                        color: Theme.of(ctx).colorScheme.outline),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Stored locally on this device only.',
+                      style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(ctx).colorScheme.outline,
+                          ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await PrefsService.saveApiKey(
+                    _apiKeyController.text.trim());
+                if (ctx.mounted) Navigator.of(ctx).pop();
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Generate ──────────────────────────────────────────────────────────────
+
   Future<void> _generate() async {
     final name = _nameController.text.trim();
+    final apiKey = _apiKeyController.text.trim();
+
     if (_excelPath == null) {
       _showSnack('Please select an Excel file first.');
       return;
     }
     if (name.isEmpty) {
-      _showSnack("Please enter the target's full name.");
+      _showSnack("Please enter the donor's full name.");
       return;
     }
     if (_outputDir == null) {
       _showSnack('Please select an output folder.');
       return;
     }
+    if (apiKey.isEmpty) {
+      _showSnack(
+          'Please add your OpenAI API key (tap the key icon in the top bar).');
+      return;
+    }
 
-    setState(() => _isGenerating = true);
+    setState(() {
+      _isGenerating = true;
+      _statusMessage = 'Starting…';
+    });
 
-    // TODO: Replace this block with your actual file generation logic.
-    await Future.delayed(const Duration(seconds: 1));
-    // Example placeholder output:
-    final outputPath = p.join(_outputDir!, '$name - output.xlsx');
-    // await generateFile(inputPath: _excelPath!, targetName: name, outputPath: outputPath);
-
-    setState(() => _isGenerating = false);
-
-    if (!mounted) return;
-    _showSnack('File ready at: $outputPath', duration: 4);
+    String? outputPath;
+    try {
+      await for (final status in GeneratorService.generate(
+        excelPath: _excelPath!,
+        outputDir: _outputDir!,
+        openAiApiKey: apiKey,
+        targetName: name,
+      )) {
+        if (!mounted) return;
+        outputPath = status;
+        setState(() => _statusMessage = status);
+      }
+      if (!mounted) return;
+      _showSnack(
+        'Saved: ${outputPath != null ? p.basename(outputPath) : 'briefing document'}',
+        duration: 6,
+      );
+    } on FileSystemException {
+      if (!mounted) return;
+      _showSnack(
+        'Cannot read the Excel file — macOS sandbox requires re-selecting it.',
+        duration: 6,
+      );
+      setState(() {
+        _excelPath = null;
+        _lastSavedPath = null;
+      });
+      await PrefsService.clearLastExcelPath();
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('Error: $e', duration: 8);
+    } finally {
+      if (mounted) setState(() => _isGenerating = false);
+    }
   }
 
   void _showSnack(String msg, {int duration = 3}) {
@@ -115,16 +247,36 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final keyIsSet = _apiKeyController.text.isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('NPS File Processor'),
+        title: const Text('NPS Briefing Generator'),
         backgroundColor: cs.primary,
         foregroundColor: cs.onPrimary,
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Tooltip(
+              message: keyIsSet ? 'API key is set' : 'Set OpenAI API key',
+              child: IconButton(
+                onPressed: _showApiKeyDialog,
+                icon: Badge(
+                  isLabelVisible: keyIsSet,
+                  backgroundColor: Colors.greenAccent.shade400,
+                  smallSize: 8,
+                  child: const Icon(Icons.vpn_key_outlined),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
       body: Center(
         child: ConstrainedBox(
@@ -139,7 +291,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Active file display
                     if (_excelPath != null)
                       _FileChip(
                         path: _excelPath!,
@@ -147,24 +298,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         onClear: () => setState(() => _excelPath = null),
                       )
                     else
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 12, horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: cs.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          'No file selected',
-                          style: TextStyle(color: cs.onSurfaceVariant),
-                        ),
-                      ),
+                      _emptyBox(cs, 'No file selected'),
                     const SizedBox(height: 12),
                     Row(
                       children: [
                         Expanded(
                           child: FilledButton.icon(
-                            onPressed: _pickExcelFile,
+                            onPressed: _isGenerating ? null : _pickExcelFile,
                             icon: const Icon(Icons.upload_file),
                             label: const Text('Upload Excel'),
                           ),
@@ -174,7 +314,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: _useLastFile,
+                              onPressed:
+                                  _isGenerating ? null : _useLastFile,
                               icon: const Icon(Icons.history),
                               label: const Text('Use Last File'),
                             ),
@@ -197,15 +338,18 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 16),
 
-              // ── Section 2: Target Name ─────────────────────────────
+              // ── Section 2: Donor Name ──────────────────────────────
               _SectionCard(
-                title: "Target's Full Name",
+                title: "Donor's Full Name",
                 icon: Icons.person_outline,
                 child: TextField(
                   controller: _nameController,
+                  enabled: !_isGenerating,
                   decoration: const InputDecoration(
-                    hintText: 'Enter full name',
+                    hintText: 'e.g. Jane Smith',
                     prefixIcon: Icon(Icons.badge_outlined),
+                    helperText:
+                        'Must match the name in the Excel file exactly (or close enough).',
                   ),
                   textCapitalization: TextCapitalization.words,
                 ),
@@ -226,7 +370,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         decoration: BoxDecoration(
                           color: cs.primaryContainer.withValues(alpha: 0.4),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: cs.primary.withValues(alpha: 0.3)),
+                          border: Border.all(
+                              color: cs.primary.withValues(alpha: 0.3)),
                         ),
                         child: Row(
                           children: [
@@ -241,28 +386,20 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             IconButton(
                               icon: const Icon(Icons.close, size: 18),
-                              onPressed: () => setState(() => _outputDir = null),
+                              onPressed: _isGenerating
+                                  ? null
+                                  : () => setState(() => _outputDir = null),
                               visualDensity: VisualDensity.compact,
                             ),
                           ],
                         ),
                       )
                     else
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 12, horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: cs.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          'No folder selected',
-                          style: TextStyle(color: cs.onSurfaceVariant),
-                        ),
-                      ),
+                      _emptyBox(cs, 'No folder selected'),
                     const SizedBox(height: 12),
                     OutlinedButton.icon(
-                      onPressed: _pickOutputDirectory,
+                      onPressed:
+                          _isGenerating ? null : _pickOutputDirectory,
                       icon: const Icon(Icons.folder_open),
                       label: const Text('Browse Folder'),
                     ),
@@ -282,18 +419,58 @@ class _HomeScreenState extends State<HomeScreen> {
                             strokeWidth: 2, color: Colors.white),
                       )
                     : const Icon(Icons.play_arrow_rounded),
-                label: Text(_isGenerating ? 'Generating...' : 'Generate File'),
+                label: Text(
+                    _isGenerating ? 'Generating…' : 'Generate Briefing'),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   textStyle: const TextStyle(fontSize: 16),
                 ),
               ),
+
+              // ── Status ────────────────────────────────────────────
+              if (_isGenerating && _statusMessage.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 12, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _statusMessage,
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
       ),
     );
   }
+
+  Widget _emptyBox(ColorScheme cs, String label) => Container(
+        padding:
+            const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(label, style: TextStyle(color: cs.onSurfaceVariant)),
+      );
 }
 
 // ── Helper widgets ──────────────────────────────────────────────────────────
