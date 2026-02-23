@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+NPS.iml
+
+# Claude Code local settings
+.claude/
+
+# Generated outputs
+Generated_Briefing.docx
