@@ -152,7 +152,28 @@
 
 7. Asked claude to migrate the python file's functionality over 
 
-* In progress 
+8. Incremental features & tweeks 
+
+   - [ ] Open last saved location instead of from root folder 
+
+   - [ ] Tweek outputted document formatting & bullet point 
+
+     - [ ] Add more details to biography bullet points 
+
+       
+
+     - [ ] Fix minor formatting errors 
+
+9. Additional tests 
+
+   - [ ] Iterative data validation 
+   - [ ] Outputting a separate "sources & quotes" document 
+   - [ ] Test with messier & missing data 
+     - [ ] Usually the missing field is current employment => will have to implement more effective LinkedIn pipeline or ask user to provide it (additional UI / pop-up)
+   - [ ] Experiment with n8n as an alternative
+   - [ ] Product test with a windows device 
+   - [ ] Publish the software so it's downloadable for the client 
+
 
 ### Misc. 
 
