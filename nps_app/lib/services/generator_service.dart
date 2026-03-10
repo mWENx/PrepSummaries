@@ -1,5 +1,9 @@
+import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
+import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'bio_prompt.dart';
+import 'bio_result.dart';
 import 'excel_service.dart';
 import 'llm_provider.dart';
 import 'openai_service.dart';
@@ -8,31 +12,202 @@ import 'claude_service.dart';
 import 'docx_service.dart';
 
 class GeneratorService {
-  /// Runs the full pipeline and yields status strings as it progresses.
-  /// Throws on any error.
   static Stream<String> generate({
     required String excelPath,
     required String outputDir,
     required String apiKey,
     required String targetName,
     required LlmProvider provider,
+    String? linkedInPdfPath,
   }) async* {
-    yield 'Looking up "$targetName" in Excel…';
+    // ── Step 1/5: Parse Excel ─────────────────────────────────────────────
+    yield 'Step 1/5 — Reading donor data from Excel…';
     final donorData =
         ExcelService.extractDonorData(excelPath, targetName: targetName);
+    yield 'Step 1/5 — Found ${donorData.donorName}.';
 
-    yield 'Searching the web for ${donorData.donorName} via ${provider.displayName}…';
-    final bioNotes = await _fetchBio(provider, apiKey, donorData);
+    // ── Step 2/5: LinkedIn PDF (if provided) ────────────────────────────
+    SearchExcerpt? linkedInExcerpt;
+    Map<String, dynamic>? linkedInIdentity;
+    if (linkedInPdfPath != null) {
+      yield 'Step 2/5 — Extracting LinkedIn profile summary…';
+      final linkedInText = _extractPdfText(linkedInPdfPath);
+      if (linkedInText.isNotEmpty) {
+        final extractResponse = await _complete(provider, apiKey,
+            BioPrompt.buildLinkedInExtractPrompt(linkedInText));
+        linkedInIdentity = BioPrompt.parseLinkedInExtract(extractResponse);
+        final identity = linkedInIdentity;
 
-    yield 'Filling briefing template…';
+        yield 'Step 2/5 — Verifying LinkedIn profile matches ${donorData.donorName}…';
+        final checkResponse = await _complete(
+            provider,
+            apiKey,
+            BioPrompt.buildLinkedInCheckPrompt(
+              donorName: donorData.donorName,
+              employer: donorData.primaryEmployer,
+              jobTitle: donorData.donorJobTitle,
+              affiliation: donorData.donorAffiliation,
+              linkedInIdentity: identity,
+            ));
+        final check = BioPrompt.parseLinkedInCheck(checkResponse);
+
+        if (check.isMatch) {
+          yield 'Step 2/5 — LinkedIn verified: ${check.confidence} confidence — ${check.reason}';
+          linkedInExcerpt = SearchExcerpt(
+            url: 'LinkedIn PDF (uploaded by user, verified)',
+            title:
+                'LinkedIn Profile — ${identity['name'] ?? donorData.donorName}',
+            text: linkedInText,
+          );
+        } else {
+          yield 'Step 2/5 — LinkedIn PDF does NOT match ${donorData.donorName}: ${check.reason}';
+          yield 'Step 2/5 — Skipping LinkedIn PDF.';
+        }
+      }
+    } else {
+      yield 'Step 2/5 — No LinkedIn PDF provided, skipping.';
+    }
+
+    // ── Step 3/5: Web search ────────────────────────────────────────────
+    yield 'Step 3/5 — Searching the web for ${donorData.donorName} via ${provider.displayName}…';
+    final searchPrompt = BioPrompt.buildSearchPrompt(
+      donorName: donorData.donorName,
+      employer: donorData.primaryEmployer,
+      jobTitle: donorData.donorJobTitle,
+      affiliation: donorData.donorAffiliation,
+      linkedInIdentity: linkedInIdentity,
+    );
+
+    final searchResponse = await _searchWeb(provider, apiKey, searchPrompt);
+    final webExcerpts = BioPrompt.parseSearchResult(searchResponse);
+
+    if (webExcerpts.isEmpty && linkedInExcerpt == null) {
+      yield 'Step 3/5 — No results found. Generating briefing with empty bio notes…';
+      await _generateOutputs(
+        donorData: donorData,
+        bioNotes: [],
+        verifiedExcerpts: [],
+        outputDir: outputDir,
+        provider: provider,
+      );
+      yield _outputPath(outputDir, donorData.donorName);
+      return;
+    }
+
+    yield 'Step 3/5 — Found ${webExcerpts.length} web source(s)${linkedInExcerpt != null ? ' + LinkedIn PDF' : ''}.';
+
+    // ── Step 4/5: Verify web sources ────────────────────────────────────
+    yield 'Step 4/5 — Verifying sources against LinkedIn profile…';
+    List<SearchExcerpt> verifiedWeb = [];
+    if (webExcerpts.isNotEmpty) {
+      final verifyPrompt = BioPrompt.buildVerifyPrompt(
+        donorName: donorData.donorName,
+        employer: donorData.primaryEmployer,
+        jobTitle: donorData.donorJobTitle,
+        affiliation: donorData.donorAffiliation,
+        excerpts: webExcerpts,
+        linkedInIdentity: linkedInIdentity,
+      );
+      final verifyResponse = await _complete(provider, apiKey, verifyPrompt);
+      verifiedWeb = BioPrompt.parseVerifyResult(verifyResponse, webExcerpts);
+    }
+
+    final allChecked = <SearchExcerpt>[
+      if (linkedInExcerpt != null) linkedInExcerpt,
+      ...verifiedWeb,
+    ];
+    final verified = allChecked.where((e) => e.verified).toList();
+    final excluded = allChecked.where((e) => !e.verified).length;
+    yield 'Step 4/5 — ${verified.length} verified, $excluded excluded.';
+
+    if (verified.isEmpty) {
+      yield 'Step 4/5 — No verified sources. Generating briefing with empty bio notes…';
+      await _generateOutputs(
+        donorData: donorData,
+        bioNotes: [],
+        verifiedExcerpts: allChecked,
+        outputDir: outputDir,
+        provider: provider,
+        usedLinkedIn: linkedInExcerpt != null,
+      );
+      yield _outputPath(outputDir, donorData.donorName);
+      return;
+    }
+
+    // ── Step 5/5: Write biography & generate documents ──────────────────
+    yield 'Step 5/5 — Writing biography from ${verified.length} verified source(s)…';
+    final bioPrompt = BioPrompt.buildBioPrompt(
+      donorName: donorData.donorName,
+      verifiedExcerpts: verified,
+    );
+
+    final bioResponse = await _complete(provider, apiKey, bioPrompt);
+    final bioNotes = BioPrompt.parseBioResult(bioResponse);
+
+    yield 'Step 5/5 — Generating briefing and research materials…';
+    await _generateOutputs(
+      donorData: donorData,
+      bioNotes: bioNotes,
+      verifiedExcerpts: allChecked,
+      outputDir: outputDir,
+      provider: provider,
+      usedLinkedIn: linkedInExcerpt != null,
+    );
+
+    yield _outputPath(outputDir, donorData.donorName);
+  }
+
+  // ── PDF text extraction ────────────────────────────────────────────────
+
+  static String _extractPdfText(String pdfPath) {
+    try {
+      final bytes = File(pdfPath).readAsBytesSync();
+      final document = PdfDocument(inputBytes: bytes);
+      final extractor = PdfTextExtractor(document);
+      final text = extractor.extractText();
+      document.dispose();
+      return text.trim();
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // ── Output generation ───────────────────────────────────────────────────
+
+  static Future<void> _generateOutputs({
+    required DonorData donorData,
+    required List<String> bioNotes,
+    required List<SearchExcerpt> verifiedExcerpts,
+    required String outputDir,
+    required LlmProvider provider,
+    bool usedLinkedIn = false,
+  }) async {
+    final safeName =
+        donorData.donorName.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_');
+
+    // Build verified research materials .docx
+    final sourcesPath =
+        p.join(outputDir, '$safeName - Research Materials.docx');
+    final sourcesMd = _buildVerifiedSourcesMd(
+      donorName: donorData.donorName,
+      employer: donorData.primaryEmployer,
+      jobTitle: donorData.donorJobTitle,
+      affiliation: donorData.donorAffiliation,
+      verifiedExcerpts: verifiedExcerpts,
+      bioNotes: bioNotes,
+      provider: provider,
+      usedLinkedIn: usedLinkedIn,
+    );
+    await DocxService.createFromMarkdown(
+      markdownContent: sourcesMd,
+      outputPath: sourcesPath,
+    );
+
+    // Fill briefing template
     final templateData =
         await rootBundle.load('assets/templates/FY26_Briefing_Template.docx');
     final templateBytes = templateData.buffer.asUint8List();
-
-    // Build a safe filename from the donor name
-    final safeName =
-        donorData.donorName.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_');
-    final outputPath = p.join(outputDir, '$safeName - Briefing.docx');
+    final outputPath = _outputPath(outputDir, donorData.donorName);
 
     await DocxService.fillTemplate(
       templateBytes: templateBytes,
@@ -42,34 +217,124 @@ class GeneratorService {
       contacts: donorData.contacts,
       donorFirstName: donorData.donorFirstName,
     );
-
-    yield outputPath;
   }
 
-  static Future<List<String>> _fetchBio(
-      LlmProvider provider, String apiKey, DonorData donor) {
+  static String _outputPath(String outputDir, String donorName) {
+    final safeName =
+        donorName.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_');
+    return p.join(outputDir, '$safeName - Briefing.docx');
+  }
+
+  // ── Verified sources markdown ───────────────────────────────────────────
+
+  static String _buildVerifiedSourcesMd({
+    required String donorName,
+    required String employer,
+    required String jobTitle,
+    required String affiliation,
+    required List<SearchExcerpt> verifiedExcerpts,
+    required List<String> bioNotes,
+    required LlmProvider provider,
+    bool usedLinkedIn = false,
+  }) {
+    final date = DateTime.now().toIso8601String().split('T').first;
+    final buf = StringBuffer();
+
+    buf.writeln('# Research Materials: $donorName');
+    buf.writeln();
+    buf.writeln('**Provider:** ${provider.displayName}');
+    buf.writeln(
+        '**Identity:** $jobTitle at $employer${affiliation.isNotEmpty ? ', $affiliation' : ''}');
+    buf.writeln('**Generated:** $date');
+    buf.writeln();
+
+    // ── Verified Sources ──
+    buf.writeln('---');
+    buf.writeln();
+    buf.writeln('# Verified Sources');
+    buf.writeln();
+
+    final verified = verifiedExcerpts.where((e) => e.verified).toList();
+    // Separate LinkedIn from web sources
+    final webVerified =
+        verified.where((e) => !e.url.contains('LinkedIn PDF')).toList();
+
+    if (usedLinkedIn) {
+      buf.writeln('## LinkedIn Profile (uploaded by user, verified)');
+      buf.writeln();
+      buf.writeln(
+          '> Content not duplicated here — refer to the uploaded LinkedIn PDF.');
+      buf.writeln();
+    }
+
+    if (webVerified.isEmpty && !usedLinkedIn) {
+      buf.writeln('No verified sources found.');
+      buf.writeln();
+    }
+
+    for (int i = 0; i < webVerified.length; i++) {
+      buf.writeln('## [${i + 1}] ${webVerified[i].title}');
+      buf.writeln('**URL:** ${webVerified[i].url}');
+      buf.writeln();
+      for (final line in webVerified[i].text.split('\n')) {
+        buf.writeln('> $line');
+      }
+      buf.writeln();
+    }
+
+    // ── Excluded Sources ──
+    final excluded = verifiedExcerpts.where((e) => !e.verified).toList();
+    if (excluded.isNotEmpty) {
+      buf.writeln('---');
+      buf.writeln();
+      buf.writeln('# Excluded Sources');
+      buf.writeln();
+      for (final ex in excluded) {
+        buf.writeln('### ${ex.title}');
+        buf.writeln('**URL:** ${ex.url}');
+        buf.writeln('**Reason:** ${ex.reason}');
+        buf.writeln();
+      }
+    }
+
+    // ── Bio Notes ──
+    if (bioNotes.isNotEmpty) {
+      buf.writeln('---');
+      buf.writeln();
+      buf.writeln('# Biography Notes (as used in briefing)');
+      buf.writeln();
+      for (final note in bioNotes) {
+        buf.writeln('- $note');
+      }
+      buf.writeln();
+    }
+
+    return buf.toString();
+  }
+
+  // ── LLM dispatch ───────────────────────────────────────────────────────
+
+  static Future<String> _searchWeb(
+      LlmProvider provider, String apiKey, String prompt) {
     switch (provider) {
       case LlmProvider.openai:
-        return OpenAIService(apiKey).fetchBiography(
-          donorName: donor.donorName,
-          employer: donor.primaryEmployer,
-          jobTitle: donor.donorJobTitle,
-          affiliation: donor.donorAffiliation,
-        );
+        return OpenAIService(apiKey).searchWeb(prompt);
       case LlmProvider.gemini:
-        return GeminiService(apiKey).fetchBiography(
-          donorName: donor.donorName,
-          employer: donor.primaryEmployer,
-          jobTitle: donor.donorJobTitle,
-          affiliation: donor.donorAffiliation,
-        );
+        return GeminiService(apiKey).searchWeb(prompt);
       case LlmProvider.claude:
-        return ClaudeService(apiKey).fetchBiography(
-          donorName: donor.donorName,
-          employer: donor.primaryEmployer,
-          jobTitle: donor.donorJobTitle,
-          affiliation: donor.donorAffiliation,
-        );
+        return ClaudeService(apiKey).searchWeb(prompt);
+    }
+  }
+
+  static Future<String> _complete(
+      LlmProvider provider, String apiKey, String prompt) {
+    switch (provider) {
+      case LlmProvider.openai:
+        return OpenAIService(apiKey).complete(prompt);
+      case LlmProvider.gemini:
+        return GeminiService(apiKey).complete(prompt);
+      case LlmProvider.claude:
+        return ClaudeService(apiKey).complete(prompt);
     }
   }
 }

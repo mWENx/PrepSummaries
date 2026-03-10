@@ -316,8 +316,31 @@ class DocxService {
 
     if (sampleParagraphs.isEmpty) return;
 
-    // Use the first Sample paragraph's position and style as template
+    // Capture the first Sample paragraph's full pPr XML so we can
+    // replicate its numbering (w:numPr), spacing, and font properties.
     final firstSample = sampleParagraphs.first;
+    String? samplePprXml;
+    String? sampleRprXml;
+    for (final child in firstSample.childElements) {
+      if (child.name.local == 'pPr') {
+        samplePprXml = child.toXmlString();
+        // Also grab the rPr nested inside pPr (paragraph-level run props)
+        break;
+      }
+    }
+    // Grab the run-level rPr from the first run
+    for (final child in firstSample.childElements) {
+      if (child.name.local == 'r') {
+        for (final rc in child.childElements) {
+          if (rc.name.local == 'rPr') {
+            sampleRprXml = rc.toXmlString();
+            break;
+          }
+        }
+        break;
+      }
+    }
+
     final parent = firstSample.parent;
     if (parent == null) return;
     final insertIdx = parent.children.indexOf(firstSample);
@@ -332,20 +355,26 @@ class DocxService {
     // Insert bio note paragraphs at the position of the first removed Sample
     final adjustedIdx = insertIdx.clamp(0, parent.children.length);
     for (int i = 0; i < bioNotes.length; i++) {
-      final newP = _buildListParagraph(bioNotes[i]);
+      final newP = _buildListParagraph(
+          bioNotes[i], samplePprXml, sampleRprXml);
       parent.children.insert(adjustedIdx + i, newP);
     }
   }
 
-  /// Builds a w:p with ListParagraph style and the given text.
-  static XmlElement _buildListParagraph(String text) {
+  /// Builds a w:p that replicates the template's bullet formatting.
+  /// Uses the captured pPr (with numPr for bullet, spacing, fonts) and
+  /// rPr (run-level font/size) from the original "Sample" paragraphs.
+  static XmlElement _buildListParagraph(
+      String text, String? pPrXml, String? rPrXml) {
     final escaped = _escapeXml(text);
+    // Fall back to a basic ListParagraph if we couldn't capture the original
+    final pPr = pPrXml ?? '<w:pPr><w:pStyle w:val="ListParagraph"/></w:pPr>';
+    final rPr = rPrXml ?? '';
     final fragment = XmlDocument.parse(
       '<?xml version="1.0"?>'
       '<root xmlns:w="$_wNS" xml:space="preserve">'
-      '<w:p>'
-      '<w:pPr><w:pStyle w:val="ListParagraph"/></w:pPr>'
-      '<w:r><w:t xml:space="preserve">$escaped</w:t></w:r>'
+      '<w:p>$pPr'
+      '<w:r>$rPr<w:t xml:space="preserve">$escaped</w:t></w:r>'
       '</w:p>'
       '</root>',
     );
@@ -483,4 +512,163 @@ class DocxService {
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;');
+
+  // ── Create a .docx from markdown-style text ────────────────────────────
+
+  /// Creates a standalone .docx from simple markdown content.
+  /// Supports: # headings, **bold**, > blockquotes, - bullets, --- breaks.
+  static Future<void> createFromMarkdown({
+    required String markdownContent,
+    required String outputPath,
+  }) async {
+    final paragraphs = <String>[];
+
+    for (final line in markdownContent.split('\n')) {
+      final trimmed = line.trimRight();
+
+      if (trimmed.isEmpty) {
+        paragraphs.add(_mdParagraph('', null));
+        continue;
+      }
+
+      if (trimmed == '---') {
+        paragraphs.add(_mdHr());
+        continue;
+      }
+
+      if (trimmed.startsWith('### ')) {
+        paragraphs.add(_mdHeading(trimmed.substring(4), 22, false));
+      } else if (trimmed.startsWith('## ')) {
+        paragraphs.add(_mdHeading(trimmed.substring(3), 24, true));
+      } else if (trimmed.startsWith('# ')) {
+        paragraphs.add(_mdHeading(trimmed.substring(2), 28, true));
+      } else if (trimmed.startsWith('> ')) {
+        paragraphs.add(_mdBlockquote(trimmed.substring(2)));
+      } else if (trimmed.startsWith('- ')) {
+        paragraphs.add(_mdBullet(trimmed.substring(2)));
+      } else {
+        paragraphs.add(_mdParagraph(trimmed, null));
+      }
+    }
+
+    final bodyContent = paragraphs.join('\n');
+    final documentXml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="$_wNS"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+$bodyContent
+    <w:sectPr>
+      <w:pgSz w:w="12240" w:h="15840"/>
+      <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"
+               w:header="720" w:footer="720" w:gutter="0"/>
+    </w:sectPr>
+  </w:body>
+</w:document>''';
+
+    const contentTypes = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml"
+            ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/numbering.xml"
+            ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
+</Types>''';
+
+    const rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>''';
+
+    const docRels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>
+</Relationships>''';
+
+    const numberingXml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:abstractNum w:abstractNumId="0">
+    <w:lvl w:ilvl="0">
+      <w:start w:val="1"/>
+      <w:numFmt w:val="bullet"/>
+      <w:lvlText w:val="\u2022"/>
+      <w:lvlJc w:val="left"/>
+      <w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr>
+    </w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1">
+    <w:abstractNumId w:val="0"/>
+  </w:num>
+</w:numbering>''';
+
+    final archive = Archive();
+
+    void addFile(String name, String content) {
+      final bytes = utf8.encode(content);
+      archive.addFile(ArchiveFile(name, bytes.length, bytes));
+    }
+
+    addFile('[Content_Types].xml', contentTypes);
+    addFile('_rels/.rels', rels);
+    addFile('word/_rels/document.xml.rels', docRels);
+    addFile('word/document.xml', documentXml);
+    addFile('word/numbering.xml', numberingXml);
+
+    final outputBytes = ZipEncoder().encode(archive)!;
+    await File(outputPath).writeAsBytes(outputBytes);
+  }
+
+  // ── Markdown → Word XML helpers ────────────────────────────────────────
+
+  static String _mdRuns(String text, {String? rPrExtra}) {
+    final buf = StringBuffer();
+    final parts = text.split('**');
+    for (int i = 0; i < parts.length; i++) {
+      final part = parts[i];
+      if (part.isEmpty) continue;
+      final isBold = i % 2 == 1;
+      final escaped = _escapeXml(part);
+      final rPr = StringBuffer();
+      if (isBold || (rPrExtra != null && rPrExtra.isNotEmpty)) {
+        rPr.write('<w:rPr>');
+        if (isBold) rPr.write('<w:b/><w:bCs/>');
+        if (rPrExtra != null) rPr.write(rPrExtra);
+        rPr.write('</w:rPr>');
+      }
+      buf.write(
+          '<w:r>$rPr<w:t xml:space="preserve">$escaped</w:t></w:r>');
+    }
+    return buf.toString();
+  }
+
+  static String _mdParagraph(String text, String? pPr) {
+    final pPrXml = pPr != null ? '<w:pPr>$pPr</w:pPr>' : '';
+    return '    <w:p>$pPrXml${_mdRuns(text)}</w:p>';
+  }
+
+  static String _mdHeading(String text, int sizeHalfPt, bool bold) {
+    final rPr = '<w:sz w:val="$sizeHalfPt"/><w:szCs w:val="$sizeHalfPt"/>';
+    final pPr = '<w:pPr><w:spacing w:before="240" w:after="80"/></w:pPr>';
+    final bPr = bold ? '<w:b/><w:bCs/>' : '';
+    return '    <w:p>$pPr${_mdRuns(text, rPrExtra: '$bPr$rPr')}</w:p>';
+  }
+
+  static String _mdBlockquote(String text) {
+    final pPr =
+        '<w:ind w:left="480"/><w:pBdr><w:left w:val="single" w:sz="4" w:space="8" w:color="999999"/></w:pBdr>';
+    final rPr = '<w:color w:val="555555"/><w:sz w:val="20"/><w:szCs w:val="20"/>';
+    return '    <w:p><w:pPr>$pPr</w:pPr>${_mdRuns(text, rPrExtra: rPr)}</w:p>';
+  }
+
+  static String _mdBullet(String text) {
+    const pPr =
+        '<w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>';
+    return '    <w:p><w:pPr>$pPr</w:pPr>${_mdRuns(text)}</w:p>';
+  }
+
+  static String _mdHr() {
+    return '    <w:p>'
+        '<w:pPr><w:pBdr><w:bottom w:val="single" w:sz="4" w:space="1" w:color="CCCCCC"/></w:pBdr></w:pPr>'
+        '</w:p>';
+  }
 }

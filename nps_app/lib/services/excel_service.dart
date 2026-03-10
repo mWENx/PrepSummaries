@@ -56,7 +56,7 @@ class ExcelService {
   static DonorData extractDonorData(
       String filePath, {required String targetName}) {
     var bytes = File(filePath).readAsBytesSync();
-    bytes = _fixNumFmts(bytes);
+    bytes = fixNumFmts(bytes);
     return _extract(bytes, targetName: targetName);
   }
 
@@ -241,7 +241,9 @@ class ExcelService {
   // Fix: remap every offending ID to a safe custom range (200+) and update
   // every <xf> element that references the old ID.
 
-  static Uint8List _fixNumFmts(Uint8List bytes) {
+  /// Fixes Excel files with numFmtId < 164 in the custom numFmts block.
+  /// Public so the Excel viewer can also use it.
+  static Uint8List fixNumFmts(Uint8List bytes) {
     try {
       final archive = ZipDecoder().decodeBytes(bytes);
       ArchiveFile? stylesFile;

@@ -149,3 +149,33 @@ The app supports three LLM providers for biography generation. All use web searc
 | Anthropic Claude | `claude-sonnet-4-6` | `/v1/messages` | `web_search_20250305` tool |
 
 API keys are stored per-provider in SharedPreferences and persist when switching between providers.
+
+### Works Cited / Source Attribution
+
+All three providers return citation data alongside the generated biography:
+
+| Provider | API-Level Citation Source | Data Available |
+|---|---|---|
+| OpenAI | `annotations[].url_citation` in output_text | URL, title, character offsets in generated text |
+| Gemini | `groundingMetadata.groundingChunks[].web` | URL, title; `groundingSupports` maps text segments to chunks |
+| Claude | `web_search_tool_result` content blocks | URL, title, full page_content (what was actually read) |
+
+**Implementation:**
+
+1. **Updated prompt** (`bio_prompt.dart`) asks the LLM to include inline citation numbers `[1]`, `[2]` in biography bullets and return structured sources with `index`, `title`, `url`, and `detail` (what was learned).
+
+2. **Dual citation extraction** — Each service parses both:
+   - The JSON `sources` array from the LLM output (has numbered indices matching bio text)
+   - The API-level citation metadata from the provider's response format
+   - These are merged and de-duplicated by URL (`BioPrompt.mergeCitations`)
+
+3. **WORKS CITED section** — Appended at the very end of the generated document (after Recent Contacts). Each entry is formatted as:
+   ```
+   [1] Page Title
+        https://example.com/article
+        What information was drawn from this source
+   ```
+
+4. **Shared model** (`bio_result.dart`):
+   - `Citation`: index, title, url, detail
+   - `BioResult`: biography list + citations list

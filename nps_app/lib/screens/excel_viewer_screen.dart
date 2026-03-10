@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:excel/excel.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import '../services/excel_service.dart';
 
 class ExcelViewerScreen extends StatefulWidget {
   final String filePath;
@@ -27,7 +28,8 @@ class _ExcelViewerScreenState extends State<ExcelViewerScreen>
 
   Future<void> _loadExcel() async {
     try {
-      final bytes = await File(widget.filePath).readAsBytes();
+      final bytes = ExcelService.fixNumFmts(
+          await File(widget.filePath).readAsBytes());
       final excel = Excel.decodeBytes(bytes);
       setState(() {
         _excel = excel;
