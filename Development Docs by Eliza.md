@@ -150,7 +150,7 @@
   cd nps_app && flutter run -d macos
 ```
 
-7. Asked claude to migrate the python file's functionality over 
+7. Migrated the python file's functionality over 
 
 8. Incremental features & tweeks 
 
@@ -160,19 +160,21 @@
 
      - [ ] Add more details to biography bullet points 
 
-       
-
      - [ ] Fix minor formatting errors 
+
+   - [ ] Gcal integration (add event listener for McCormick Dev Calendar)
+   
+   - [ ] Multi-LLM Interface 
 
 9. Additional tests 
 
    - [ ] Iterative data validation 
-   - [ ] Outputting a separate "sources & quotes" document 
+   - [ ] ==Outputting a separate "sources & quotes" document== 
    - [ ] Test with messier & missing data 
      - [ ] Usually the missing field is current employment => will have to implement more effective LinkedIn pipeline or ask user to provide it (additional UI / pop-up)
    - [ ] Experiment with n8n as an alternative
    - [ ] Product test with a windows device 
-   - [ ] Publish the software so it's downloadable for the client 
+   - [ ] ==Publish the software so it's downloadable for the client== 
 
 
 ### Misc. 

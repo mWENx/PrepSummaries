@@ -5,19 +5,47 @@ import 'package:archive/archive.dart';
 import 'package:excel/excel.dart';
 import 'package:xml/xml.dart';
 
+/// A single contact report entry extracted from the Excel data.
+class ContactEntry {
+  final String headline; // Contact Report: Description
+  final String date; // Contact Report Date (formatted)
+  final String body; // Contact Report: Contact Report Body
+  final String author; // Contact Report Author
+  final String purpose; // Contact Report: Purpose
+  final String method; // Contact Report: Contact Method
+
+  const ContactEntry({
+    required this.headline,
+    required this.date,
+    required this.body,
+    required this.author,
+    required this.purpose,
+    required this.method,
+  });
+}
+
 class DonorData {
   final String donorName;
+  final String donorFirstName;
   final String primaryEmployer;
   final String donorJobTitle;
   final String donorAffiliation;
-  final Map<String, String> replacements;
+
+  /// Mail-merge field name → replacement value.
+  /// Keys match the MERGEFIELD names in the FY26 template.
+  final Map<String, String> mergeFields;
+
+  /// Structured contact report entries (newest first).
+  final List<ContactEntry> contacts;
 
   const DonorData({
     required this.donorName,
+    required this.donorFirstName,
     required this.primaryEmployer,
     required this.donorJobTitle,
     required this.donorAffiliation,
-    required this.replacements,
+    required this.mergeFields,
+    required this.contacts,
   });
 }
 
@@ -28,7 +56,7 @@ class ExcelService {
   static DonorData extractDonorData(
       String filePath, {required String targetName}) {
     var bytes = File(filePath).readAsBytesSync();
-    bytes = _fixNumFmts(bytes); // fix malformed numFmtId values before parsing
+    bytes = _fixNumFmts(bytes);
     return _extract(bytes, targetName: targetName);
   }
 
@@ -113,6 +141,10 @@ class ExcelService {
     const dateCol = 'Contact Report Date';
     const descCol = 'Contact Report: Description';
     const bodyCol = 'Contact Report: Contact Report Body';
+    const authorCol =
+        'Contact Report: Contact Report Author (User): Full Name';
+    const purposeCol = 'Contact Report: Purpose';
+    const methodCol = 'Contact Report: Contact Method';
 
     final donorId = getCol(first, donorIdCol);
     final contactRows = <List<Data?>>[];
@@ -136,71 +168,67 @@ class ExcelService {
       });
     }
 
-    // Build contact entry strings
-    final entries = <String>[];
+    // Build structured contact entries
+    final contacts = <ContactEntry>[];
     for (final row in contactRows) {
       final desc = getCol(row, descCol);
       final date = getDateCol(row, dateCol);
       final body = getCol(row, bodyCol);
+      final author = getCol(row, authorCol);
+      final purpose = getCol(row, purposeCol);
+      final method = getCol(row, methodCol);
       if (desc.isEmpty && body.isEmpty && date.isEmpty) continue;
-      var line1 = '$desc on $date'.trim();
-      if (line1 == 'on') line1 = '';
-      final entry =
-          body.isNotEmpty ? '$line1\n$body'.trim() : line1.trim();
-      if (entry.isNotEmpty) entries.add(entry);
+      contacts.add(ContactEntry(
+        headline: desc.isNotEmpty ? '$desc — $date' : date,
+        date: date,
+        body: body,
+        author: author,
+        purpose: purpose,
+        method: method,
+      ));
     }
 
-    var firstDesc = '';
-    var firstDate = '';
-    var recentContacts = '';
-
-    if (contactRows.isNotEmpty) {
-      final mostRecent = contactRows.first;
-      firstDesc = getCol(mostRecent, descCol);
-      firstDate = getDateCol(mostRecent, dateCol);
-      final mostRecentBody = getCol(mostRecent, bodyCol);
-      final rest = entries.skip(1).toList();
-      recentContacts = mostRecentBody;
-      if (rest.isNotEmpty) {
-        recentContacts =
-            '$recentContacts\n\n${rest.join('\n\n')}'.trim();
-      }
-    }
-
+    // ── Extract donor metadata ───────────────────────────────────────────
     final donorName = getCol(first, 'Constituent: First and Last Name');
+    final donorFirstName = getCol(first, 'Constituent: First Name (No Trustee)');
     final donorAffiliation =
         getCol(first, 'Constituent: Directory Suffix - NU School & Year');
     final primaryEmployer =
         getCol(first, 'Constituent: Primary Employer: Account Name');
     final donorJobTitle = getCol(first, 'Constituent: Job Title');
 
-    final replacements = {
-      '{{meeting_type}}': getCol(first, 'Contact Report: Contact Method'),
-      '{{donor_name}}': donorName,
-      '{{staff_name}}': getCol(
-          first, 'Contact Report: Contact Report Author (User): Full Name'),
-      '{{meeting_platform}}': 'Zoom Link',
-      '{{meeting_date}}': getDateCol(first, 'Contact Report Date'),
-      '{{donor_affiliation}}': donorAffiliation,
-      '{{primary_employer}}': primaryEmployer,
-      '{{donor_job_title}}': donorJobTitle,
-      '{{lifetime_giving}}':
-          getMoneyCol(first, 'Constituent: Lifetime Fundraising'),
-      '{{recent_gift_amount}}':
-          getMoneyCol(first, 'Constituent: Amount of Most Recent Gift'),
-      '{{recent_gift_date}}':
-          getDateCol(first, 'Constituent: Date of Most Recent Gift'),
-      '{{contact_report_description}}': firstDesc,
-      '{{contact_report_date}}': firstDate,
-      '{{recent_contacts}}': recentContacts,
+    // ── Build merge field map ────────────────────────────────────────────
+    // Keys match the MERGEFIELD names in FY26_New_Briefing_Template_MailMerge.docx
+    final mergeFields = <String, String>{
+      'Donor_Name': donorName,
+      'All_Degrees': donorAffiliation,
+      'Primary_Employer_Name': primaryEmployer,
+      'Primary_Employment_Job_Title': donorJobTitle,
+      'Preferred_City':
+          getCol(first, 'Constituent: Preferred Address City'),
+      'Preferred_State':
+          getCol(first, 'Constituent: Preferred Address State'),
+      'Primary_Relationship_Manager_Name': '', // not in Excel data pull
+      'University_Overall_Rating':
+          getCol(first, 'University Overall Rating'),
+      'Lifetime_New_Gifts__Comm_Credit':
+          getMoneyCol(first, 'Lifetime New Gifts & Comm. Credit'),
+      'McCormick_Lifetime_New_Gifts__Comm_Cre':
+          getMoneyCol(first, 'McCormick Lifetime New Gifts & Comm. Credit'),
+      'McCormick_Last_Gift_or_Pledge_Informatio':
+          getCol(first, 'McCormick Last Gift or Pledge Information'),
+      'McCormick_Last_Gift_or_Pledge_Date':
+          getDateCol(first, 'McCormick Last Gift or Pledge Date'),
     };
 
     return DonorData(
       donorName: donorName,
+      donorFirstName: donorFirstName,
       primaryEmployer: primaryEmployer,
       donorJobTitle: donorJobTitle,
       donorAffiliation: donorAffiliation,
-      replacements: replacements,
+      mergeFields: mergeFields,
+      contacts: contacts,
     );
   }
 
@@ -211,8 +239,7 @@ class ExcelService {
   // the excel package asserts/throws when it encounters them there.
   //
   // Fix: remap every offending ID to a safe custom range (200+) and update
-  // every <xf> element that references the old ID.  Deleting the entries
-  // instead would leave dangling xf references and cause a different crash.
+  // every <xf> element that references the old ID.
 
   static Uint8List _fixNumFmts(Uint8List bytes) {
     try {
@@ -233,7 +260,6 @@ class ExcelService {
 
       final doc = XmlDocument.parse(stylesXml);
 
-      // Build old-id → new-id remap for every numFmt with id < 164
       int nextId = 200;
       final remap = <String, String>{};
       for (final el in doc.findAllElements('numFmt').toList()) {
@@ -246,9 +272,8 @@ class ExcelService {
         }
       }
 
-      if (remap.isEmpty) return bytes; // nothing to fix
+      if (remap.isEmpty) return bytes;
 
-      // Update every <xf> that still references the old IDs
       for (final xf in doc.findAllElements('xf').toList()) {
         final ref = xf.getAttribute('numFmtId') ?? '';
         if (remap.containsKey(ref)) {
@@ -268,7 +293,7 @@ class ExcelService {
       }
       return Uint8List.fromList(ZipEncoder().encode(newArchive)!);
     } catch (_) {
-      return bytes; // preprocessing failed — return original bytes
+      return bytes;
     }
   }
 

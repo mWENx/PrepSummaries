@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import '../services/llm_provider.dart';
 import '../services/prefs_service.dart';
 import '../services/generator_service.dart';
 import 'excel_viewer_screen.dart';
@@ -18,32 +19,53 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _lastSavedPath;
   String? _outputDir;
   final _nameController = TextEditingController();
-  final _apiKeyController = TextEditingController();
+
+  // ── LLM provider state ──────────────────────────────────────────────────
+  LlmProvider _selectedProvider = LlmProvider.openai;
+
+  /// Stores the API key text controller for each provider.
+  final _apiKeyControllers = {
+    for (final p in LlmProvider.values) p: TextEditingController(),
+  };
 
   bool _isGenerating = false;
   String _statusMessage = '';
 
+  TextEditingController get _activeKeyController =>
+      _apiKeyControllers[_selectedProvider]!;
+
   @override
   void initState() {
     super.initState();
-    _apiKeyController.addListener(() => setState(() {})); // keeps badge in sync
+    for (final c in _apiKeyControllers.values) {
+      c.addListener(() => setState(() {}));
+    }
     _loadPrefs();
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _apiKeyController.dispose();
+    for (final c in _apiKeyControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
   Future<void> _loadPrefs() async {
     final path = await PrefsService.getLastExcelPath();
-    final key = await PrefsService.getApiKey();
+    final provider = await PrefsService.getSelectedProvider();
+
+    // Load all saved API keys
+    for (final p in LlmProvider.values) {
+      final key = await PrefsService.getApiKey(p);
+      if (key != null) _apiKeyControllers[p]!.text = key;
+    }
+
     if (!mounted) return;
     setState(() {
       if (path != null && File(path).existsSync()) _lastSavedPath = path;
-      if (key != null) _apiKeyController.text = key;
+      _selectedProvider = provider;
     });
   }
 
@@ -65,12 +87,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Tries to use the saved path, but detects sandbox permission loss and
-  /// prompts the user to re-pick if we can no longer access the file.
   Future<void> _useLastFile() async {
     if (_lastSavedPath == null) return;
     try {
-      // Quick open-and-close to verify we still have read permission
       File(_lastSavedPath!).openSync().closeSync();
       setState(() => _excelPath = _lastSavedPath);
     } on FileSystemException {
@@ -104,6 +123,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showApiKeyDialog() {
     bool obscured = true;
+    // Work with the active provider's controller
+    final controller = _activeKeyController;
+    final provider = _selectedProvider;
+
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -113,7 +136,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Icon(Icons.vpn_key_outlined,
                   color: Theme.of(ctx).colorScheme.primary),
               const SizedBox(width: 8),
-              const Text('OpenAI API Key'),
+              Text('${provider.displayName} API Key'),
             ],
           ),
           content: SizedBox(
@@ -122,11 +145,11 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
-                  controller: _apiKeyController,
+                  controller: controller,
                   obscureText: obscured,
                   autofocus: true,
                   decoration: InputDecoration(
-                    hintText: 'sk-…',
+                    hintText: provider.keyHint,
                     suffixIcon: IconButton(
                       icon: Icon(obscured
                           ? Icons.visibility_outlined
@@ -162,7 +185,7 @@ class _HomeScreenState extends State<HomeScreen> {
             FilledButton(
               onPressed: () async {
                 await PrefsService.saveApiKey(
-                    _apiKeyController.text.trim());
+                    provider, controller.text.trim());
                 if (ctx.mounted) Navigator.of(ctx).pop();
               },
               child: const Text('Save'),
@@ -173,11 +196,18 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ── Provider switching ──────────────────────────────────────────────────
+
+  Future<void> _switchProvider(LlmProvider provider) async {
+    setState(() => _selectedProvider = provider);
+    await PrefsService.saveSelectedProvider(provider);
+  }
+
   // ── Generate ──────────────────────────────────────────────────────────────
 
   Future<void> _generate() async {
     final name = _nameController.text.trim();
-    final apiKey = _apiKeyController.text.trim();
+    final apiKey = _activeKeyController.text.trim();
 
     if (_excelPath == null) {
       _showSnack('Please select an Excel file first.');
@@ -193,7 +223,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     if (apiKey.isEmpty) {
       _showSnack(
-          'Please add your OpenAI API key (tap the key icon in the top bar).');
+          'Please add your ${_selectedProvider.displayName} API key (tap the key icon in the top bar).');
       return;
     }
 
@@ -207,8 +237,9 @@ class _HomeScreenState extends State<HomeScreen> {
       await for (final status in GeneratorService.generate(
         excelPath: _excelPath!,
         outputDir: _outputDir!,
-        openAiApiKey: apiKey,
+        apiKey: apiKey,
         targetName: name,
+        provider: _selectedProvider,
       )) {
         if (!mounted) return;
         outputPath = status;
@@ -253,7 +284,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final keyIsSet = _apiKeyController.text.isNotEmpty;
+    final keyIsSet = _activeKeyController.text.isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(
@@ -264,7 +295,9 @@ class _HomeScreenState extends State<HomeScreen> {
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: Tooltip(
-              message: keyIsSet ? 'API key is set' : 'Set OpenAI API key',
+              message: keyIsSet
+                  ? '${_selectedProvider.displayName} key is set'
+                  : 'Set ${_selectedProvider.displayName} API key',
               child: IconButton(
                 onPressed: _showApiKeyDialog,
                 icon: Badge(
@@ -284,6 +317,38 @@ class _HomeScreenState extends State<HomeScreen> {
           child: ListView(
             padding: const EdgeInsets.all(24),
             children: [
+              // ── Section 0: LLM Provider ──────────────────────────────
+              _SectionCard(
+                title: 'AI Provider',
+                icon: Icons.smart_toy_outlined,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SegmentedButton<LlmProvider>(
+                      segments: [
+                        for (final provider in LlmProvider.values)
+                          ButtonSegment(
+                            value: provider,
+                            label: Text(provider.displayName),
+                          ),
+                      ],
+                      selected: {_selectedProvider},
+                      onSelectionChanged: _isGenerating
+                          ? null
+                          : (sel) => _switchProvider(sel.first),
+                      showSelectedIcon: false,
+                    ),
+                    const SizedBox(height: 8),
+                    _ApiKeyStatus(
+                      provider: _selectedProvider,
+                      hasKey: keyIsSet,
+                      onTap: _showApiKeyDialog,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
               // ── Section 1: Excel File ──────────────────────────────
               _SectionCard(
                 title: 'Input Excel File',
@@ -474,6 +539,51 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ── Helper widgets ──────────────────────────────────────────────────────────
+
+class _ApiKeyStatus extends StatelessWidget {
+  final LlmProvider provider;
+  final bool hasKey;
+  final VoidCallback onTap;
+
+  const _ApiKeyStatus({
+    required this.provider,
+    required this.hasKey,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final style = Theme.of(context).textTheme.bodySmall;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        child: Row(
+          children: [
+            Icon(
+              hasKey ? Icons.check_circle : Icons.warning_amber_rounded,
+              size: 16,
+              color: hasKey ? Colors.green : cs.error,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              hasKey
+                  ? '${provider.displayName} API key is configured'
+                  : 'Tap to set ${provider.displayName} API key',
+              style: style?.copyWith(
+                color: hasKey ? cs.onSurfaceVariant : cs.error,
+              ),
+            ),
+            const Spacer(),
+            Icon(Icons.edit_outlined, size: 14, color: cs.outline),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _SectionCard extends StatelessWidget {
   final String title;

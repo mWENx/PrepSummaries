@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Two-part tool for generating donor briefing documents for Northwestern:
 
-1. **`prepSummaries.py`** — Python script that reads donor data from Excel, queries OpenAI to generate a biographical summary, and fills placeholders in a Word template to produce a briefing `.docx`.
-2. **`nps_app/`** — Flutter desktop/web app intended as a UI front-end for the same workflow. Currently the "Generate File" button in `home_screen.dart` is a stub (`TODO` at line 97).
+1. **`prepSummaries.py`** — Python script (legacy/reference). Reads donor data from Excel, queries OpenAI, fills a Word template. Uses the old `Briefing_Template.docx` with `{{placeholder}}` syntax.
+2. **`nps_app/`** — Flutter desktop/web app (primary). Full pipeline: Excel parsing → OpenAI bio search → DOCX generation using the FY26 mail-merge template.
 
-## Python Script
+## Python Script (Legacy)
 
 **Setup:** Requires a `.env` file in the root with `ChatGPT_API_KEY=<key>`.
 
@@ -18,13 +18,6 @@ Two-part tool for generating donor briefing documents for Northwestern:
 pip install pandas python-docx openai python-dotenv
 python prepSummaries.py
 ```
-
-**How it works:**
-- Reads `Briefing Data Pull Example.xlsx` (first row = target donor; all rows with same `Constituent: Donor ID` = recent contacts)
-- Queries GPT-4.1-mini to web-search the donor and return structured JSON `{ found, biography: [string], sources }`
-- Fills `{{placeholder}}` tokens in `Briefing_Template.docx` using `replace_everywhere()`, which handles placeholders split across Word XML runs
-- Inserts biography bullet points at `{{bio_notes}}` via `insert_bio_notes()`
-- Outputs `Generated_Briefing.docx`
 
 ## Flutter App
 
@@ -41,19 +34,34 @@ flutter analyze
 flutter test               # runs nps_app/test/
 ```
 
-**Add macOS support if missing:**
-```bash
-flutter create --platforms=macos .
-```
-
 **Architecture:**
 - `lib/main.dart` — App entry point, `MaterialApp` with Material 3 theme (seed color `#1565C0`)
-- `lib/screens/home_screen.dart` — Single-page UI: file picker (Excel), target name input, output folder picker, generate button. Persists last Excel path via `PrefsService`.
+- `lib/screens/home_screen.dart` — Single-page UI: file picker (Excel), target name input, output folder picker, generate button. Persists last Excel path and API key via `PrefsService`.
 - `lib/screens/excel_viewer_screen.dart` — Full-screen Excel preview; renders each sheet as a scrollable `DataTable` using the `excel` package.
-- `lib/services/prefs_service.dart` — Thin wrapper around `shared_preferences` to store/retrieve the last-used Excel file path.
+- `lib/services/prefs_service.dart` — Thin wrapper around `shared_preferences` for last-used Excel path, per-provider API keys, and selected LLM provider.
+- `lib/services/excel_service.dart` — Parses donor data from Excel → `DonorData` (merge fields map + structured contact entries).
+- `lib/services/llm_provider.dart` — `LlmProvider` enum (openai, gemini, claude) with display names, key hints, prefs keys.
+- `lib/services/openai_service.dart` — OpenAI Responses API (`gpt-4.1-mini` with `web_search_preview`).
+- `lib/services/gemini_service.dart` — Gemini API (`gemini-2.0-flash` with `google_search` grounding).
+- `lib/services/claude_service.dart` — Anthropic Messages API (`claude-sonnet-4-6` with `web_search_20250305`).
+- `lib/services/docx_service.dart` — Unzips .docx, replaces Word MERGEFIELD complex fields, inserts bio notes and contact reports, rezips.
+- `lib/services/generator_service.dart` — Async stream orchestrating the full pipeline.
 
-**Key pending work:** `_generate()` in `home_screen.dart` is a placeholder. The actual briefing generation logic (currently in `prepSummaries.py`) needs to be wired in here.
+**Template:** `assets/templates/FY26_Briefing_Template.docx` (FY26 mail-merge format)
 
-## Template Placeholder Syntax
+**Data source:** `Updated Data Pull Example.xlsx`
 
-`Briefing_Template.docx` uses `{{snake_case}}` placeholders. The full mapping is defined in the `replacements` dict in `prepSummaries.py`. The special placeholder `{{bio_notes}}` is replaced with a list of bullet paragraphs rather than inline text.
+## Template & Field Mapping
+
+The FY26 template uses **Word MERGEFIELD complex fields** (not `{{placeholder}}` syntax). See `Field_Mapping.md` for the complete mapping between Excel columns and template fields.
+
+**Key points:**
+- 12 mail merge fields mapped from Excel columns (e.g. `Donor_Name`, `All_Degrees`, `University_Overall_Rating`)
+- `Preferred_Mail_Name` is static text (not a MERGEFIELD) — replaced via text find-and-replace
+- "Sample" bullets under BIOGRAPHICAL NOTES are replaced with AI-generated bio
+- `<<Contact Report Headline>>` / `<<<Contact report text>>` placeholders are replaced with structured contact entries from Excel rows grouped by Donor ID
+- `Primary_Relationship_Manager_Name` has no Excel column — left empty
+
+## Packages (nps_app/pubspec.yaml)
+
+file_picker, shared_preferences, excel, path, http, archive, xml

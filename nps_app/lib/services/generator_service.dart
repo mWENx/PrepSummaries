@@ -1,7 +1,10 @@
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'excel_service.dart';
+import 'llm_provider.dart';
 import 'openai_service.dart';
+import 'gemini_service.dart';
+import 'claude_service.dart';
 import 'docx_service.dart';
 
 class GeneratorService {
@@ -10,25 +13,20 @@ class GeneratorService {
   static Stream<String> generate({
     required String excelPath,
     required String outputDir,
-    required String openAiApiKey,
+    required String apiKey,
     required String targetName,
+    required LlmProvider provider,
   }) async* {
     yield 'Looking up "$targetName" in Excel…';
     final donorData =
         ExcelService.extractDonorData(excelPath, targetName: targetName);
 
-    yield 'Searching the web for ${donorData.donorName}…';
-    final openAI = OpenAIService(openAiApiKey);
-    final bioNotes = await openAI.fetchBiography(
-      donorName: donorData.donorName,
-      employer: donorData.primaryEmployer,
-      jobTitle: donorData.donorJobTitle,
-      affiliation: donorData.donorAffiliation,
-    );
+    yield 'Searching the web for ${donorData.donorName} via ${provider.displayName}…';
+    final bioNotes = await _fetchBio(provider, apiKey, donorData);
 
     yield 'Filling briefing template…';
     final templateData =
-        await rootBundle.load('assets/templates/Briefing_Template.docx');
+        await rootBundle.load('assets/templates/FY26_Briefing_Template.docx');
     final templateBytes = templateData.buffer.asUint8List();
 
     // Build a safe filename from the donor name
@@ -39,10 +37,39 @@ class GeneratorService {
     await DocxService.fillTemplate(
       templateBytes: templateBytes,
       outputPath: outputPath,
-      replacements: donorData.replacements,
+      mergeFields: donorData.mergeFields,
       bioNotes: bioNotes,
+      contacts: donorData.contacts,
+      donorFirstName: donorData.donorFirstName,
     );
 
     yield outputPath;
+  }
+
+  static Future<List<String>> _fetchBio(
+      LlmProvider provider, String apiKey, DonorData donor) {
+    switch (provider) {
+      case LlmProvider.openai:
+        return OpenAIService(apiKey).fetchBiography(
+          donorName: donor.donorName,
+          employer: donor.primaryEmployer,
+          jobTitle: donor.donorJobTitle,
+          affiliation: donor.donorAffiliation,
+        );
+      case LlmProvider.gemini:
+        return GeminiService(apiKey).fetchBiography(
+          donorName: donor.donorName,
+          employer: donor.primaryEmployer,
+          jobTitle: donor.donorJobTitle,
+          affiliation: donor.donorAffiliation,
+        );
+      case LlmProvider.claude:
+        return ClaudeService(apiKey).fetchBiography(
+          donorName: donor.donorName,
+          employer: donor.primaryEmployer,
+          jobTitle: donor.donorJobTitle,
+          affiliation: donor.donorAffiliation,
+        );
+    }
   }
 }
