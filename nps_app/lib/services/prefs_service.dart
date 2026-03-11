@@ -82,4 +82,17 @@ class PrefsService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keySelectedProvider, provider.name);
   }
+
+  // ── Per-provider selected model ─────────────────────────────────────
+
+  static Future<String?> getSelectedModel(LlmProvider provider) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(provider.modelPrefsKey);
+  }
+
+  static Future<void> saveSelectedModel(
+      LlmProvider provider, String modelId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(provider.modelPrefsKey, modelId);
+  }
 }

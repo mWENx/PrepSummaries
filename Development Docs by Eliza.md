@@ -151,31 +151,32 @@
 ```
 
 7. Migrated the python file's functionality over 
-
 8. Incremental features & tweeks 
 
    - [x] Open last saved location instead of from root folder 
-
    - [x] Tweek outputted document formatting & bullet point 
 
      - [x] Add more details to biography bullet points 
 
      - [ ] Fix minor formatting errors 
-
-   - [ ] Gcal integration (add event listener for McCormick Dev Calendar)
-     - [ ] 不做
-
+   - [x] Gcal integration (add event listener for McCormick Dev Calendar)
+     - [x] 不做, out of time 
    - [x] Multi-LLM Interface 
-
+     - [x] Allow user to choose API provider / LLM 
+     - [x] Allow user to choose model 
+     - [x] Display estimated cost 
 9. Additional tests 
 
-   - [ ] Iterative data validation 
-     - [ ] Need to tweak relevance 
+   - [x] Iterative data validation 
+     - [x] Need to tweak relevance 
    - [x] ==Outputting a separate "sources & quotes" document== 
    - [ ] Test with messier & missing data 
      - [ ] Usually the missing field is current employment => will have to implement more effective LinkedIn pipeline or ask user to provide it (additional UI / pop-up)
+     - [ ] What if we don't find donor in the excel based on the inputted name? 
+     - [ ] What if there's no LinkedIn pdf? 
+     - [ ] etc. etc. 
    - [x] Experiment with n8n as an alternative
-     - [x] Cost 25 dollars a month
+     - [x] Cost 25 dollars a month, not usable 
    - [ ] Product test with a windows device 
    - [ ] ==Publish the software so it's downloadable for the client== 
 

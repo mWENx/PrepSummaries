@@ -3,10 +3,10 @@ import 'package:http/http.dart' as http;
 
 class OpenAIService {
   final String apiKey;
+  final String model;
   static const _endpoint = 'https://api.openai.com/v1/responses';
-  static const _model = 'gpt-4.1-mini';
 
-  const OpenAIService(this.apiKey);
+  const OpenAIService(this.apiKey, {this.model = 'gpt-4.1-mini'});
 
   /// Sends a prompt with web search enabled. Returns raw text output.
   Future<String> searchWeb(String prompt) async {
@@ -17,7 +17,8 @@ class OpenAIService {
         'Content-Type': 'application/json',
       },
       body: jsonEncode({
-        'model': _model,
+        'model': model,
+        'max_output_tokens': 16000,
         'input': prompt,
         'tools': [
           {'type': 'web_search_preview'}
@@ -43,7 +44,8 @@ class OpenAIService {
         'Content-Type': 'application/json',
       },
       body: jsonEncode({
-        'model': _model,
+        'model': model,
+        'max_output_tokens': 16000,
         'input': prompt,
       }),
     );

@@ -29,6 +29,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ── LLM provider state ──────────────────────────────────────────────────
   LlmProvider _selectedProvider = LlmProvider.openai;
+  final Map<LlmProvider, String> _selectedModels = {
+    for (final p in LlmProvider.values) p: p.defaultModel,
+  };
 
   final _apiKeyControllers = {
     for (final p in LlmProvider.values) p: TextEditingController(),
@@ -71,6 +74,11 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final p in LlmProvider.values) {
       final key = await PrefsService.getApiKey(p);
       if (key != null) _apiKeyControllers[p]!.text = key;
+      final savedModel = await PrefsService.getSelectedModel(p);
+      if (savedModel != null &&
+          p.models.any((m) => m.id == savedModel)) {
+        _selectedModels[p] = savedModel;
+      }
     }
 
     if (!mounted) return;
@@ -236,6 +244,47 @@ class _HomeScreenState extends State<HomeScreen> {
                     showSelectedIcon: false,
                   ),
                   const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: _selectedModels[_selectedProvider],
+                    decoration: const InputDecoration(
+                      labelText: 'Model',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: _selectedProvider.models
+                        .map((m) => DropdownMenuItem(
+                              value: m.id,
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(m.displayName),
+                                  Text(
+                                    m.costLabel,
+                                    style: Theme.of(ctx)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: cs.onSurfaceVariant,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ))
+                        .toList(),
+                    onChanged: _isGenerating
+                        ? null
+                        : (val) {
+                            if (val != null) {
+                              setState(() =>
+                                  _selectedModels[_selectedProvider] = val);
+                              setDialogState(() {});
+                              PrefsService.saveSelectedModel(
+                                  _selectedProvider, val);
+                            }
+                          },
+                  ),
+                  const SizedBox(height: 16),
                   _ApiKeyField(
                     provider: _selectedProvider,
                     controller: _apiKeyControllers[_selectedProvider]!,
@@ -324,6 +373,7 @@ class _HomeScreenState extends State<HomeScreen> {
         targetName: name,
         provider: _selectedProvider,
         linkedInPdfPath: _linkedInPath,
+        model: _selectedModels[_selectedProvider],
       )) {
         if (!mounted) return;
         outputPath = status;

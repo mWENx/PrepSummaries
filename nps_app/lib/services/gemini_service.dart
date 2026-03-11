@@ -3,9 +3,9 @@ import 'package:http/http.dart' as http;
 
 class GeminiService {
   final String apiKey;
-  static const _model = 'gemini-2.0-flash';
+  final String model;
 
-  const GeminiService(this.apiKey);
+  const GeminiService(this.apiKey, {this.model = 'gemini-2.0-flash'});
 
   /// Sends a prompt with Google Search grounding enabled. Returns raw text.
   Future<String> searchWeb(String prompt) async {
@@ -22,7 +22,7 @@ class GeminiService {
   Future<String> _call(String prompt,
       {List<Map<String, dynamic>>? tools}) async {
     final endpoint = Uri.parse(
-        'https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$apiKey');
+        'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey');
 
     final body = <String, dynamic>{
       'contents': [

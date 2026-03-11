@@ -413,15 +413,35 @@ class DocxService {
     if (parent == null) return;
     final insertIdx = parent.children.indexOf(firstPlaceholder);
 
-    // Extract the SectionHeading style pPr from the first headline placeholder
-    // so we can replicate it for real contact headlines
-    String? headlineStyleXml;
-    if (headlinePlaceholders.isNotEmpty) {
-      final pPr = headlinePlaceholders.first.childElements
+    // Capture run-level rPr from body placeholder for consistent font/size
+    String? bodyRprXml;
+    if (textPlaceholders.isNotEmpty) {
+      for (final r in textPlaceholders.first.childElements
+          .where((e) => e.name.local == 'r')) {
+        for (final child in r.childElements) {
+          if (child.name.local == 'rPr') {
+            bodyRprXml = child.toXmlString();
+            break;
+          }
+        }
+        if (bodyRprXml != null) break;
+      }
+    }
+    // Capture pPr from body placeholder for spacing/line height
+    String? bodyPprInner;
+    if (textPlaceholders.isNotEmpty) {
+      final pPr = textPlaceholders.first.childElements
           .where((e) => e.name.local == 'pPr')
           .firstOrNull;
       if (pPr != null) {
-        headlineStyleXml = pPr.toXmlString();
+        // Get inner XML (children) but strip any pStyle to avoid SectionHeading
+        final innerBuf = StringBuffer();
+        for (final child in pPr.childElements) {
+          if (child.name.local != 'pStyle') {
+            innerBuf.write(child.toXmlString());
+          }
+        }
+        bodyPprInner = innerBuf.toString();
       }
     }
 
@@ -439,44 +459,61 @@ class DocxService {
     final adjustedIdx = insertIdx.clamp(0, parent.children.length);
     int offset = 0;
     for (final contact in contacts) {
-      // Headline paragraph
+      // Headline paragraph — normal body font, underlined
       final headlineP =
-          _buildContactHeadline(contact.headline, headlineStyleXml);
+          _buildContactHeadline(contact.headline, bodyPprInner, bodyRprXml);
       parent.children.insert(adjustedIdx + offset, headlineP);
       offset++;
 
       // Body paragraph
       if (contact.body.isNotEmpty) {
-        final bodyP = _buildContactBody(contact.body);
+        final bodyP = _buildContactBody(contact.body, bodyPprInner, bodyRprXml);
         parent.children.insert(adjustedIdx + offset, bodyP);
         offset++;
       }
     }
   }
 
+  /// Builds a contact headline paragraph — same body font but underlined.
   static XmlElement _buildContactHeadline(
-      String text, String? pPrXml) {
+      String text, String? pPrInner, String? rPrXml) {
     final escaped = _escapeXml(text);
-    final styleBlock =
-        pPrXml ?? '<w:pPr><w:pStyle w:val="SectionHeading"/></w:pPr>';
+    // Add spacing-before for visual separation between contacts
+    final pPr = '<w:pPr><w:spacing w:before="240"/>${pPrInner ?? ''}</w:pPr>';
+    // Take body rPr and inject underline
+    String rPr;
+    if (rPrXml != null) {
+      // Insert <w:u w:val="single"/> inside the existing <w:rPr>
+      rPr = rPrXml.replaceFirst('</w:rPr>', '<w:u w:val="single"/></w:rPr>');
+    } else {
+      rPr = '<w:rPr><w:rFonts w:ascii="Akkurat Pro" w:hAnsi="Akkurat Pro"/>'
+          '<w:sz w:val="20"/><w:szCs w:val="20"/>'
+          '<w:u w:val="single"/></w:rPr>';
+    }
     final fragment = XmlDocument.parse(
       '<?xml version="1.0"?>'
       '<root xmlns:w="$_wNS" xml:space="preserve">'
-      '<w:p>$styleBlock'
-      '<w:r><w:t xml:space="preserve">$escaped</w:t></w:r>'
+      '<w:p>$pPr'
+      '<w:r>$rPr<w:t xml:space="preserve">$escaped</w:t></w:r>'
       '</w:p>'
       '</root>',
     );
     return fragment.rootElement.childElements.first.copy();
   }
 
-  static XmlElement _buildContactBody(String text) {
+  /// Builds a contact body paragraph with the template's body font/size.
+  static XmlElement _buildContactBody(
+      String text, String? pPrInner, String? rPrXml) {
     final escaped = _escapeXml(text);
+    final pPr = pPrInner != null ? '<w:pPr>$pPrInner</w:pPr>' : '';
+    final rPr = rPrXml ??
+        '<w:rPr><w:rFonts w:ascii="Akkurat Pro" w:hAnsi="Akkurat Pro"/>'
+            '<w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>';
     final fragment = XmlDocument.parse(
       '<?xml version="1.0"?>'
       '<root xmlns:w="$_wNS" xml:space="preserve">'
-      '<w:p>'
-      '<w:r><w:t xml:space="preserve">$escaped</w:t></w:r>'
+      '<w:p>$pPr'
+      '<w:r>$rPr<w:t xml:space="preserve">$escaped</w:t></w:r>'
       '</w:p>'
       '</root>',
     );

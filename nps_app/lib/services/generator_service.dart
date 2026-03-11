@@ -19,6 +19,7 @@ class GeneratorService {
     required String targetName,
     required LlmProvider provider,
     String? linkedInPdfPath,
+    String? model,
   }) async* {
     // ── Step 1/5: Parse Excel ─────────────────────────────────────────────
     yield 'Step 1/5 — Reading donor data from Excel…';
@@ -34,7 +35,7 @@ class GeneratorService {
       final linkedInText = _extractPdfText(linkedInPdfPath);
       if (linkedInText.isNotEmpty) {
         final extractResponse = await _complete(provider, apiKey,
-            BioPrompt.buildLinkedInExtractPrompt(linkedInText));
+            BioPrompt.buildLinkedInExtractPrompt(linkedInText), model: model);
         linkedInIdentity = BioPrompt.parseLinkedInExtract(extractResponse);
         final identity = linkedInIdentity;
 
@@ -48,7 +49,8 @@ class GeneratorService {
               jobTitle: donorData.donorJobTitle,
               affiliation: donorData.donorAffiliation,
               linkedInIdentity: identity,
-            ));
+            ),
+            model: model);
         final check = BioPrompt.parseLinkedInCheck(checkResponse);
 
         if (check.isMatch) {
@@ -78,7 +80,7 @@ class GeneratorService {
       linkedInIdentity: linkedInIdentity,
     );
 
-    final searchResponse = await _searchWeb(provider, apiKey, searchPrompt);
+    final searchResponse = await _searchWeb(provider, apiKey, searchPrompt, model: model);
     final webExcerpts = BioPrompt.parseSearchResult(searchResponse);
 
     if (webExcerpts.isEmpty && linkedInExcerpt == null) {
@@ -96,6 +98,15 @@ class GeneratorService {
 
     yield 'Step 3/5 — Found ${webExcerpts.length} web source(s)${linkedInExcerpt != null ? ' + LinkedIn PDF' : ''}.';
 
+    // Dump raw (pre-verification) sources for debugging
+    await _writeRawSources(
+      donorName: donorData.donorName,
+      webExcerpts: webExcerpts,
+      linkedInExcerpt: linkedInExcerpt,
+      outputDir: outputDir,
+      provider: provider,
+    );
+
     // ── Step 4/5: Verify web sources ────────────────────────────────────
     yield 'Step 4/5 — Verifying sources against LinkedIn profile…';
     List<SearchExcerpt> verifiedWeb = [];
@@ -108,7 +119,7 @@ class GeneratorService {
         excerpts: webExcerpts,
         linkedInIdentity: linkedInIdentity,
       );
-      final verifyResponse = await _complete(provider, apiKey, verifyPrompt);
+      final verifyResponse = await _complete(provider, apiKey, verifyPrompt, model: model);
       verifiedWeb = BioPrompt.parseVerifyResult(verifyResponse, webExcerpts);
     }
 
@@ -141,7 +152,7 @@ class GeneratorService {
       verifiedExcerpts: verified,
     );
 
-    final bioResponse = await _complete(provider, apiKey, bioPrompt);
+    final bioResponse = await _complete(provider, apiKey, bioPrompt, model: model);
     final bioNotes = BioPrompt.parseBioResult(bioResponse);
 
     yield 'Step 5/5 — Generating briefing and research materials…';
@@ -312,29 +323,89 @@ class GeneratorService {
     return buf.toString();
   }
 
+  // ── Raw sources dump (debug) ──────────────────────────────────────────
+
+  static Future<void> _writeRawSources({
+    required String donorName,
+    required List<SearchExcerpt> webExcerpts,
+    SearchExcerpt? linkedInExcerpt,
+    required String outputDir,
+    required LlmProvider provider,
+  }) async {
+    final safeName =
+        donorName.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_');
+    final date = DateTime.now().toIso8601String().split('T').first;
+    final buf = StringBuffer();
+    buf.writeln('# Raw Sources (Pre-Verification): $donorName');
+    buf.writeln();
+    buf.writeln('**Provider:** ${provider.displayName}');
+    buf.writeln('**Generated:** $date');
+    buf.writeln();
+
+    if (linkedInExcerpt != null) {
+      buf.writeln('---');
+      buf.writeln();
+      buf.writeln('## LinkedIn Profile (uploaded)');
+      buf.writeln();
+      for (final line in linkedInExcerpt.text.split('\n')) {
+        buf.writeln('> $line');
+      }
+      buf.writeln();
+    }
+
+    buf.writeln('---');
+    buf.writeln();
+    buf.writeln('# Web Sources (${webExcerpts.length} total)');
+    buf.writeln();
+
+    for (int i = 0; i < webExcerpts.length; i++) {
+      buf.writeln('## [${i + 1}] ${webExcerpts[i].title}');
+      buf.writeln('**URL:** ${webExcerpts[i].url}');
+      buf.writeln();
+      for (final line in webExcerpts[i].text.split('\n')) {
+        buf.writeln('> $line');
+      }
+      buf.writeln();
+    }
+
+    final rawPath = p.join(outputDir, '$safeName - Raw Sources.docx');
+    await DocxService.createFromMarkdown(
+      markdownContent: buf.toString(),
+      outputPath: rawPath,
+    );
+  }
+
   // ── LLM dispatch ───────────────────────────────────────────────────────
 
   static Future<String> _searchWeb(
-      LlmProvider provider, String apiKey, String prompt) {
+      LlmProvider provider, String apiKey, String prompt,
+      {String? model}) {
     switch (provider) {
       case LlmProvider.openai:
-        return OpenAIService(apiKey).searchWeb(prompt);
+        return OpenAIService(apiKey, model: model ?? provider.defaultModel)
+            .searchWeb(prompt);
       case LlmProvider.gemini:
-        return GeminiService(apiKey).searchWeb(prompt);
+        return GeminiService(apiKey, model: model ?? provider.defaultModel)
+            .searchWeb(prompt);
       case LlmProvider.claude:
-        return ClaudeService(apiKey).searchWeb(prompt);
+        return ClaudeService(apiKey, model: model ?? provider.defaultModel)
+            .searchWeb(prompt);
     }
   }
 
   static Future<String> _complete(
-      LlmProvider provider, String apiKey, String prompt) {
+      LlmProvider provider, String apiKey, String prompt,
+      {String? model}) {
     switch (provider) {
       case LlmProvider.openai:
-        return OpenAIService(apiKey).complete(prompt);
+        return OpenAIService(apiKey, model: model ?? provider.defaultModel)
+            .complete(prompt);
       case LlmProvider.gemini:
-        return GeminiService(apiKey).complete(prompt);
+        return GeminiService(apiKey, model: model ?? provider.defaultModel)
+            .complete(prompt);
       case LlmProvider.claude:
-        return ClaudeService(apiKey).complete(prompt);
+        return ClaudeService(apiKey, model: model ?? provider.defaultModel)
+            .complete(prompt);
     }
   }
 }
