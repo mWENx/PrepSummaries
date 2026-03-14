@@ -12,3 +12,5 @@ NPS.iml
 Generated_Briefing.docx
 
 *.txt
+
+/output
