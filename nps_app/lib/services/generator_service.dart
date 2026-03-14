@@ -70,18 +70,62 @@ class GeneratorService {
       yield 'Step 2/5 — No LinkedIn PDF provided, skipping.';
     }
 
-    // ── Step 3/5: Web search ────────────────────────────────────────────
-    yield 'Step 3/5 — Searching the web for ${donorData.donorName} via ${provider.displayName}…';
-    final searchPrompt = BioPrompt.buildSearchPrompt(
-      donorName: donorData.donorName,
-      employer: donorData.primaryEmployer,
-      jobTitle: donorData.donorJobTitle,
-      affiliation: donorData.donorAffiliation,
-      linkedInIdentity: linkedInIdentity,
-    );
+    // ── Step 3/5: Web search (3 parallel searches) ─────────────────────
+    yield 'Step 3/5 — Searching the web for ${donorData.donorName} via ${provider.displayName} (career + education + personal)…';
 
-    final searchResponse = await _searchWeb(provider, apiKey, searchPrompt, model: model);
-    final webExcerpts = BioPrompt.parseSearchResult(searchResponse);
+    final searchArgs = {
+      'donorName': donorData.donorName,
+      'employer': donorData.primaryEmployer,
+      'jobTitle': donorData.donorJobTitle,
+      'affiliation': donorData.donorAffiliation,
+      'linkedInIdentity': linkedInIdentity,
+    };
+
+    final results = await Future.wait([
+      _searchWeb(provider, apiKey,
+          BioPrompt.buildSearchPromptCareer(
+            donorName: searchArgs['donorName'] as String,
+            employer: searchArgs['employer'] as String,
+            jobTitle: searchArgs['jobTitle'] as String,
+            affiliation: searchArgs['affiliation'] as String,
+            linkedInIdentity: searchArgs['linkedInIdentity'] as Map<String, dynamic>?,
+          ), model: model),
+      _searchWeb(provider, apiKey,
+          BioPrompt.buildSearchPromptEducation(
+            donorName: searchArgs['donorName'] as String,
+            employer: searchArgs['employer'] as String,
+            jobTitle: searchArgs['jobTitle'] as String,
+            affiliation: searchArgs['affiliation'] as String,
+            linkedInIdentity: searchArgs['linkedInIdentity'] as Map<String, dynamic>?,
+          ), model: model),
+      _searchWeb(provider, apiKey,
+          BioPrompt.buildSearchPromptPersonal(
+            donorName: searchArgs['donorName'] as String,
+            employer: searchArgs['employer'] as String,
+            jobTitle: searchArgs['jobTitle'] as String,
+            affiliation: searchArgs['affiliation'] as String,
+            linkedInIdentity: searchArgs['linkedInIdentity'] as Map<String, dynamic>?,
+          ), model: model),
+    ]);
+
+    // Merge and deduplicate across all three searches
+    final webExcerpts = <SearchExcerpt>[];
+    final seenUrls = <String>{};
+    final seenTitles = <String>{};
+    for (final response in results) {
+      for (final excerpt in BioPrompt.parseSearchResult(response)) {
+        final normUrl = excerpt.url.split('?').first.split('#').first
+            .replaceAll(RegExp(r'/+$'), '').toLowerCase();
+        final normTitle = excerpt.title.trim().toLowerCase();
+        if (seenUrls.contains(normUrl) ||
+            (normTitle.isNotEmpty && seenTitles.contains(normTitle))) {
+          continue;
+        }
+        seenUrls.add(normUrl);
+        if (normTitle.isNotEmpty) seenTitles.add(normTitle);
+        webExcerpts.add(excerpt);
+      }
+    }
 
     if (webExcerpts.isEmpty && linkedInExcerpt == null) {
       yield 'Step 3/5 — No results found. Generating briefing with empty bio notes…';
@@ -216,7 +260,7 @@ class GeneratorService {
 
     // Fill briefing template
     final templateData =
-        await rootBundle.load('assets/templates/FY26_Briefing_Template.docx');
+        await rootBundle.load('assets/templates/new_template_mar13.docx');
     final templateBytes = templateData.buffer.asUint8List();
     final outputPath = _outputPath(outputDir, donorData.donorName);
 

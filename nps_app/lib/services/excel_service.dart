@@ -208,15 +208,20 @@ class ExcelService {
           getCol(first, 'Constituent: Preferred Address City'),
       'Preferred_State':
           getCol(first, 'Constituent: Preferred Address State'),
-      'Primary_Relationship_Manager_Name': '', // not in Excel data pull
+      'Primary_Relationship_Manager_Name':
+          getCol(first, 'Contact Report: Contact Report Author (User): Full Name'),
       'University_Overall_Rating':
           getCol(first, 'University Overall Rating'),
       'Lifetime_New_Gifts__Comm_Credit':
           getMoneyCol(first, 'Lifetime New Gifts & Comm. Credit'),
       'McCormick_Lifetime_New_Gifts__Comm_Cre':
           getMoneyCol(first, 'McCormick Lifetime New Gifts & Comm. Credit'),
+      'McCormick_Last_Gift_or_Pledge_Amount':
+          getMoneyCol(first, 'McCormick Last Gift or Pledge Amount'),
       'McCormick_Last_Gift_or_Pledge_Informatio':
-          getCol(first, 'McCormick Last Gift or Pledge Information'),
+          _formatGiftInfo(
+            getCol(first, 'McCormick Last Gift or Pledge Information'),
+          ),
       'McCormick_Last_Gift_or_Pledge_Date':
           getDateCol(first, 'McCormick Last Gift or Pledge Date'),
     };
@@ -350,6 +355,23 @@ class ExcelService {
     }
     if (amount == null) return _cellStr(cell);
     return _fmtMoney(amount);
+  }
+
+  /// Reformats the raw gift info string from
+  /// "GN3051336 - Funded - Outright Gift - McCormick School Dean's Fund - McCmick Schl of Engg & App Sci"
+  /// into "for Outright Gift to McCormick School Dean's Fund".
+  /// The dollar amount is in a separate merge field, so it's excluded here.
+  static String _formatGiftInfo(String rawInfo) {
+    if (rawInfo.isEmpty) return '';
+    // Split on " - " to get: [Gift ID, Status, Gift Type, Fund Name, School/Unit]
+    final parts = rawInfo.split(' - ');
+    if (parts.length >= 4) {
+      final giftType = parts[2].trim(); // e.g. "Outright Gift"
+      final fundName = parts[3].trim(); // e.g. "McCormick School Dean's Fund"
+      return 'for $giftType to $fundName';
+    }
+    // Fallback: return raw if we can't parse
+    return rawInfo;
   }
 
   static String _fmtDate(int year, int month, int day) =>

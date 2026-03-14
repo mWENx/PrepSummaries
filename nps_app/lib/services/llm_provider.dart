@@ -31,23 +31,23 @@ enum LlmProvider {
       };
 
   /// Available models for this provider.
-  /// Cost estimate assumes 5 calls, ~4k input tokens + up to 16k output tokens per call.
+  /// Cost estimate assumes 7 calls (3 search + verify + LinkedIn extract/check + bio write).
   List<LlmModel> get models => switch (this) {
         openai => const [
             LlmModel('gpt-4.1-mini', 'GPT-4.1 Mini', 0.15),
-            LlmModel('gpt-4.1', 'GPT-4.1', 1.20),
+            LlmModel('gpt-4.1', 'GPT-4.1', 1.50),
             LlmModel('gpt-4.1-nano', 'GPT-4.1 Nano', 0.06),
-            LlmModel('gpt-4o', 'GPT-4o', 1.00),
+            LlmModel('gpt-4o', 'GPT-4o', 1.25),
             LlmModel('gpt-4o-mini', 'GPT-4o Mini', 0.12),
           ],
         gemini => const [
             LlmModel('gemini-2.0-flash', 'Gemini 2.0 Flash', 0.04),
-            LlmModel('gemini-2.5-flash-preview-05-20', 'Gemini 2.5 Flash', 0.06),
-            LlmModel('gemini-2.5-pro-preview-05-06', 'Gemini 2.5 Pro', 0.65),
+            LlmModel('gemini-2.5-flash-preview-05-20', 'Gemini 2.5 Flash', 0.08),
+            LlmModel('gemini-2.5-pro-preview-05-06', 'Gemini 2.5 Pro', 0.80),
           ],
         claude => const [
-            LlmModel('claude-sonnet-4-6', 'Claude Sonnet 4', 0.80),
-            LlmModel('claude-haiku-4-5-20251001', 'Claude Haiku 4.5', 0.20),
+            LlmModel('claude-sonnet-4-6', 'Claude Sonnet 4', 1.00),
+            LlmModel('claude-haiku-4-5-20251001', 'Claude Haiku 4.5', 0.25),
           ],
       };
 
@@ -65,13 +65,11 @@ class LlmModel {
   final String id;
   final String displayName;
 
-  /// Estimated cost per run (5 API calls) in USD.
+  /// Estimated max cost per run (7 API calls) in USD.
   final double estimatedCostPerRun;
 
   const LlmModel(this.id, this.displayName, this.estimatedCostPerRun);
 
   /// Formatted cost string for display.
-  String get costLabel => estimatedCostPerRun < 0.10
-      ? '~\$${estimatedCostPerRun.toStringAsFixed(2)}/run'
-      : '~\$${estimatedCostPerRun.toStringAsFixed(2)}/run';
+  String get costLabel => 'up to \$${estimatedCostPerRun.toStringAsFixed(2)}/run';
 }
