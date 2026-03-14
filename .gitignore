@@ -14,3 +14,7 @@ Generated_Briefing.docx
 *.txt
 
 /output
+architecture_diagram.py
+*.pdf
+*.png
+
