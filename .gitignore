@@ -14,7 +14,14 @@ Generated_Briefing.docx
 *.txt
 
 /output
+/archived
+/terminal_logs
+
 architecture_diagram.py
 *.pdf
 *.png
+
+Development_Log_Session_2026_03_09.md
+Field_Mapping.md
+noname
 
