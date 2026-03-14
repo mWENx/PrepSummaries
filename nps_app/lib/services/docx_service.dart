@@ -117,42 +117,41 @@ class DocxService {
 
   static void _replaceMergeFields(
       XmlDocument doc, Map<String, String> mergeFields) {
-    // Process each paragraph that contains merge fields
-    for (final p in doc.findAllElements('p', namespace: _wNS).toList()) {
-      _replaceMergeFieldsInParagraph(p, mergeFields);
-    }
+    // Handle w:fldSimple elements (simple merge fields)
+    _replaceSimpleMergeFields(doc, mergeFields);
+
+    // Handle fldChar begin/separate/end sequences — these can span paragraphs
+    // (e.g. begin+instrText in one <w:p>, separate+display+end in the next).
+    // Collect all runs across the document in order, then find field sequences.
+    _replaceCrossParagraphMergeFields(doc, mergeFields);
   }
 
-  static void _replaceMergeFieldsInParagraph(
-      XmlElement paragraph, Map<String, String> mergeFields) {
-    final runs = paragraph.childElements
-        .where((e) => e.name.local == 'r')
-        .toList();
-    if (runs.isEmpty) return;
+  /// Scans all runs in document order (across paragraph boundaries) to find
+  /// and replace fldChar begin..end merge field sequences.
+  /// Only touches the display run's text — leaves all paragraphs and
+  /// field structure intact so the template layout is preserved.
+  static void _replaceCrossParagraphMergeFields(
+      XmlDocument doc, Map<String, String> mergeFields) {
+    final allRuns = doc.findAllElements('r', namespace: _wNS).toList();
+    if (allRuns.isEmpty) return;
 
-    // Find fldChar begin/separate/end sequences
-    // We walk through runs collecting field sequences
     int i = 0;
-    while (i < runs.length) {
-      final run = runs[i];
-      final fldChar = _getFldChar(run);
-
-      if (fldChar != 'begin') {
+    while (i < allRuns.length) {
+      final run = allRuns[i];
+      if (_getFldChar(run) != 'begin') {
         i++;
         continue;
       }
 
-      // Found a begin — collect runs until end
-      final beginIdx = i;
+      // Found a begin — walk forward to find instrText, separate, end
       String? fieldName;
-      int? separateIdx;
-      XmlElement? displayRun; // the run with the display text after separate
+      XmlElement? separateRun;
+      XmlElement? displayRun;
       int? endIdx;
 
-      for (int j = beginIdx + 1; j < runs.length; j++) {
-        final r = runs[j];
+      for (int j = i + 1; j < allRuns.length; j++) {
+        final r = allRuns[j];
 
-        // Check for instrText
         if (fieldName == null) {
           final instrText = _getInstrText(r);
           if (instrText != null) {
@@ -166,12 +165,14 @@ class DocxService {
 
         final fc = _getFldChar(r);
         if (fc == 'separate') {
-          separateIdx = j;
+          separateRun = r;
         } else if (fc == 'end') {
           endIdx = j;
-          // The display run is typically the run after separate
-          if (separateIdx != null && separateIdx + 1 < j) {
-            displayRun = runs[separateIdx + 1];
+          if (separateRun != null) {
+            final sepIdx = allRuns.indexOf(separateRun);
+            if (sepIdx + 1 < j) {
+              displayRun = allRuns[sepIdx + 1];
+            }
           }
           break;
         }
@@ -182,36 +183,56 @@ class DocxService {
         continue;
       }
 
-      // Look up the value
       final value = mergeFields[fieldName];
       if (value == null) {
-        // Field not in our map — skip
         i = endIdx + 1;
         continue;
       }
 
-      // Build a replacement run: copy formatting from display run or begin run
-      final sourceRun = displayRun ?? runs[beginIdx];
-      final newRun = _buildReplacementRun(sourceRun, value);
-
-      // Remove all runs from begin to end (inclusive) and insert newRun
-      final parent = paragraph;
-      final childList = parent.children.toList();
-      final firstChild = runs[beginIdx];
-      final lastChild = runs[endIdx];
-      final firstPos = childList.indexOf(firstChild);
-      final lastPos = childList.indexOf(lastChild);
-
-      if (firstPos >= 0 && lastPos >= 0) {
-        // Remove from last to first to keep indices valid
-        for (int k = lastPos; k >= firstPos; k--) {
-          parent.children.removeAt(k);
+      // Just swap the text in the display run — don't touch paragraphs
+      if (displayRun != null) {
+        for (final t in displayRun.findAllElements('t', namespace: _wNS)) {
+          t.children
+            ..clear()
+            ..add(XmlText(value));
+          // Ensure space preservation
+          if (!t.attributes.any((a) => a.name.local == 'space')) {
+            t.attributes
+                .add(XmlAttribute(XmlName('space', 'xml'), 'preserve'));
+          }
         }
-        parent.children.insert(firstPos, newRun);
       }
 
-      // Rebuild runs list after modification
-      return _replaceMergeFieldsInParagraph(paragraph, mergeFields);
+      i = endIdx + 1;
+    }
+  }
+
+  /// Replaces <w:fldSimple w:instr=" MERGEFIELD FieldName "> elements.
+  /// These contain the display run as a direct child — we replace the
+  /// fldSimple element with that run, swapping in the merge value.
+  static void _replaceSimpleMergeFields(
+      XmlDocument doc, Map<String, String> mergeFields) {
+    for (final fld in doc.findAllElements('fldSimple', namespace: _wNS).toList()) {
+      final instr = fld.getAttribute('instr', namespace: _wNS) ??
+          fld.getAttribute('instr') ?? '';
+      final match =
+          RegExp(r'MERGEFIELD\s+"?(\S+?)"?\s').firstMatch(instr);
+      if (match == null) continue;
+      final fieldName = match.group(1);
+      final value = mergeFields[fieldName];
+      if (value == null) continue;
+
+      // Get the display run inside fldSimple to preserve its formatting
+      final displayRun = fld.childElements
+          .where((e) => e.name.local == 'r')
+          .firstOrNull;
+      if (displayRun == null) continue;
+
+      final newRun = _buildReplacementRun(displayRun, value);
+      final parent = fld.parent;
+      if (parent == null) continue;
+      final idx = parent.children.indexOf(fld);
+      parent.children[idx] = newRun;
     }
   }
 
@@ -309,7 +330,7 @@ class DocxService {
       final style = _getParagraphStyle(p);
       if (style != 'ListParagraph') continue;
       final text = _getParagraphText(p);
-      if (text.trim() == 'Sample') {
+      if (text.trim() == 'Sample' || text.trim() == 'Biographical Information') {
         sampleParagraphs.add(p);
       }
     }
@@ -413,6 +434,28 @@ class DocxService {
     if (parent == null) return;
     final insertIdx = parent.children.indexOf(firstPlaceholder);
 
+    // Capture full pPr and rPr from the headline placeholder
+    String? headlinePprXml;
+    String? headlineRprXml;
+    if (headlinePlaceholders.isNotEmpty) {
+      final hp = headlinePlaceholders.first;
+      for (final child in hp.childElements) {
+        if (child.name.local == 'pPr') {
+          headlinePprXml = child.toXmlString();
+          break;
+        }
+      }
+      for (final r in hp.childElements.where((e) => e.name.local == 'r')) {
+        for (final child in r.childElements) {
+          if (child.name.local == 'rPr') {
+            headlineRprXml = child.toXmlString();
+            break;
+          }
+        }
+        if (headlineRprXml != null) break;
+      }
+    }
+
     // Capture run-level rPr from body placeholder for consistent font/size
     String? bodyRprXml;
     if (textPlaceholders.isNotEmpty) {
@@ -459,9 +502,9 @@ class DocxService {
     final adjustedIdx = insertIdx.clamp(0, parent.children.length);
     int offset = 0;
     for (final contact in contacts) {
-      // Headline paragraph — normal body font, underlined
-      final headlineP =
-          _buildContactHeadline(contact.headline, bodyPprInner, bodyRprXml);
+      // Headline paragraph — reuses the template placeholder's pPr and rPr
+      final headlineP = _buildContactHeadline(
+          contact.headline, headlinePprXml, headlineRprXml);
       parent.children.insert(adjustedIdx + offset, headlineP);
       offset++;
 
@@ -474,22 +517,13 @@ class DocxService {
     }
   }
 
-  /// Builds a contact headline paragraph — same body font but underlined.
+  /// Builds a contact headline paragraph reusing the template placeholder's
+  /// pPr and rPr exactly as-is.
   static XmlElement _buildContactHeadline(
-      String text, String? pPrInner, String? rPrXml) {
+      String text, String? pPrXml, String? rPrXml) {
     final escaped = _escapeXml(text);
-    // Add spacing-before for visual separation between contacts
-    final pPr = '<w:pPr><w:spacing w:before="240"/>${pPrInner ?? ''}</w:pPr>';
-    // Take body rPr and inject underline
-    String rPr;
-    if (rPrXml != null) {
-      // Insert <w:u w:val="single"/> inside the existing <w:rPr>
-      rPr = rPrXml.replaceFirst('</w:rPr>', '<w:u w:val="single"/></w:rPr>');
-    } else {
-      rPr = '<w:rPr><w:rFonts w:ascii="Akkurat Pro" w:hAnsi="Akkurat Pro"/>'
-          '<w:sz w:val="20"/><w:szCs w:val="20"/>'
-          '<w:u w:val="single"/></w:rPr>';
-    }
+    final pPr = pPrXml ?? '<w:pPr><w:pStyle w:val="SectionHeading"/></w:pPr>';
+    final rPr = rPrXml ?? '<w:rPr><w:b/><w:bCs/></w:rPr>';
     final fragment = XmlDocument.parse(
       '<?xml version="1.0"?>'
       '<root xmlns:w="$_wNS" xml:space="preserve">'

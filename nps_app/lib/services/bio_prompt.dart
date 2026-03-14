@@ -5,9 +5,8 @@ import 'bio_result.dart';
 class BioPrompt {
   // ── Step 1: Web search ──────────────────────────────────────────────────
 
-  /// Prompt that asks the LLM to search the web and return raw excerpts.
-  /// Uses LinkedIn character profile to generate targeted search queries.
-  static String buildSearchPrompt({
+  /// Builds the character profile + identity block reused across search prompts.
+  static String _buildCharacterBlock({
     required String donorName,
     required String employer,
     required String jobTitle,
@@ -15,10 +14,6 @@ class BioPrompt {
     Map<String, dynamic>? linkedInIdentity,
   }) {
     final buf = StringBuffer();
-    buf.writeln('Search the web for "$donorName".');
-    buf.writeln();
-
-    // Build character profile from LinkedIn if available
     if (linkedInIdentity != null) {
       buf.writeln('CHARACTER PROFILE (from verified LinkedIn — use this to guide your searches):');
       if (linkedInIdentity['name'] != null) {
@@ -55,75 +50,12 @@ class BioPrompt {
     }
     buf.writeln('- Works or worked as $jobTitle at $employer');
     buf.writeln('- Affiliated with Northwestern University${affiliation.isNotEmpty ? ' ($affiliation)' : ''}');
+    return buf.toString();
+  }
 
-    // Build targeted search queries from character profile
-    List<String> employers = [];
-    List<String> schoolNames = [];
-    if (linkedInIdentity != null) {
-      final employment = linkedInIdentity['employment'];
-      if (employment != null && employment is List) {
-        for (final job in employment) {
-          if (job is Map && job['employer'] != null) {
-            employers.add(job['employer'].toString());
-          }
-        }
-      }
-      final education = linkedInIdentity['education'];
-      if (education != null && education is List) {
-        for (final edu in education) {
-          if (edu is Map && edu['school'] != null) {
-            schoolNames.add(edu['school'].toString());
-          }
-        }
-      }
-    }
-
-    buf.writeln();
-    buf.writeln('REQUIRED SEARCHES — you must search ALL of the following:');
-    buf.writeln('1. LinkedIn profile for "$donorName" (search "site:linkedin.com $donorName")');
-
-    int searchNum = 2;
-
-    // Targeted employer searches from LinkedIn profile
-    if (employers.isNotEmpty) {
-      for (final emp in employers) {
-        buf.writeln('$searchNum. Search for "$donorName $emp" (employer website, leadership page, team bio, press releases)');
-        searchNum++;
-      }
-    } else {
-      buf.writeln('$searchNum. Search for "$donorName $employer" (employer website, leadership page)');
-      searchNum++;
-    }
-
-    // Targeted school searches from LinkedIn profile
-    for (final school in schoolNames) {
-      buf.writeln('$searchNum. Search for "$donorName $school" (alumni pages, dean\'s lists, commencement programs, class notes, campus news)');
-      searchNum++;
-    }
-    if (!schoolNames.any((s) => s.toLowerCase().contains('northwestern'))) {
-      buf.writeln('$searchNum. Search for "$donorName Northwestern University" (alumni pages, donor recognition, event mentions)');
-      searchNum++;
-    }
-
-    buf.writeln('$searchNum. News articles, press releases, or media mentions of "$donorName"');
-    searchNum++;
-    buf.writeln('$searchNum. Board memberships, nonprofit involvement, or industry affiliations');
-    searchNum++;
-    buf.writeln('$searchNum. Personal interests, hobbies, community involvement, social mentions');
-    searchNum++;
-    buf.writeln('$searchNum. Any other pages with substantive biographical information');
-
-    buf.writeln();
-    buf.writeln('You MUST perform a SEPARATE web search for EACH numbered item above. Do not skip any.');
-    buf.writeln('Aim for at least 8-15 distinct excerpts from different sources. 2-3 is NOT enough.');
-    buf.writeln('Cast a WIDE net — gather as many distinct sources as possible. More is better.');
-    buf.writeln('Include results about this person even if they seem tangential (personal interests, community events, university activities).');
-    buf.writeln('Do NOT limit your search to Northwestern — this person has a full life and career outside of Northwestern. Search for them at every school and employer listed in their character profile.');
-    buf.writeln('For each relevant page you find, extract the text that mentions this person.');
-    buf.writeln('Look for: career history, roles, responsibilities, education, achievements,');
-    buf.writeln('board memberships, philanthropy, personal life, awards, publications,');
-    buf.writeln('speaking engagements, hobbies, and any other substantive biographical information.');
-    buf.writeln();
+  /// Common JSON schema + rules appended to every search prompt.
+  static String _buildSearchRules() {
+    final buf = StringBuffer();
     buf.writeln('Return ONLY valid JSON with this schema:');
     buf.writeln();
     buf.writeln('{');
@@ -141,35 +73,190 @@ class BioPrompt {
     buf.writeln('{"found": false, "excerpts": []}');
     buf.writeln();
     buf.writeln('RULES:');
+    buf.writeln('- ONLY include excerpts where the person\'s name appears explicitly in the page text. Do not include pages that are merely related to their employer or school but do not mention them by name.');
     buf.writeln('- Copy the actual text you find — do not paraphrase or summarize.');
     buf.writeln('- Each excerpt should focus on one source page.');
     buf.writeln('- Include the full relevant passage, not just a single sentence.');
     buf.writeln('- Do NOT include the same source/URL more than once. Each excerpt must be from a distinct page.');
     buf.writeln('- If a search returns no new results, that is fine — do not pad with duplicates.');
-    buf.writeln('- You MUST include a LinkedIn excerpt if one exists. If you cannot find their LinkedIn, note that in a separate excerpt with url "none" and title "LinkedIn — not found".');
     buf.writeln('- Do NOT include any text outside the JSON.');
-
     return buf.toString();
   }
 
-  /// Parses Step 1 output into a list of raw excerpts.
+  /// Extracts employer and school lists from the LinkedIn identity.
+  static ({List<String> employers, List<String> schools}) _extractProfileLists(
+      Map<String, dynamic>? linkedInIdentity) {
+    final employers = <String>[];
+    final schools = <String>[];
+    if (linkedInIdentity != null) {
+      final employment = linkedInIdentity['employment'];
+      if (employment != null && employment is List) {
+        for (final job in employment) {
+          if (job is Map && job['employer'] != null) {
+            employers.add(job['employer'].toString());
+          }
+        }
+      }
+      final education = linkedInIdentity['education'];
+      if (education != null && education is List) {
+        for (final edu in education) {
+          if (edu is Map && edu['school'] != null) {
+            schools.add(edu['school'].toString());
+          }
+        }
+      }
+    }
+    return (employers: employers, schools: schools);
+  }
+
+  /// Search prompt 1/3: Career — LinkedIn profile, employers, job roles.
+  static String buildSearchPromptCareer({
+    required String donorName,
+    required String employer,
+    required String jobTitle,
+    required String affiliation,
+    Map<String, dynamic>? linkedInIdentity,
+  }) {
+    final buf = StringBuffer();
+    buf.writeln('Search the web for "$donorName" — focus on CAREER and PROFESSIONAL life.');
+    buf.writeln();
+    buf.writeln(_buildCharacterBlock(
+      donorName: donorName, employer: employer,
+      jobTitle: jobTitle, affiliation: affiliation,
+      linkedInIdentity: linkedInIdentity,
+    ));
+
+    final profile = _extractProfileLists(linkedInIdentity);
+
+    buf.writeln();
+    buf.writeln('REQUIRED SEARCHES:');
+    buf.writeln('1. LinkedIn profile (search "site:linkedin.com $donorName")');
+
+    int n = 2;
+    if (profile.employers.isNotEmpty) {
+      for (final emp in profile.employers) {
+        buf.writeln('$n. "$donorName $emp" — employer website, leadership page, team bio, press releases');
+        n++;
+      }
+    } else {
+      buf.writeln('$n. "$donorName $employer" — employer website, leadership page');
+      n++;
+    }
+    buf.writeln('$n. News articles or press releases mentioning "$donorName" in a professional context');
+
+    buf.writeln();
+    buf.writeln('Perform a SEPARATE web search for EACH item. Do not skip any.');
+    buf.writeln('Only return excerpts relevant to career, employment, and professional achievements.');
+    buf.writeln();
+    buf.writeln(_buildSearchRules());
+    // LinkedIn-specific rule only in this prompt
+    buf.writeln('- You MUST include a LinkedIn excerpt if one exists. If you cannot find their LinkedIn, note that in a separate excerpt with url "none" and title "LinkedIn — not found".');
+    return buf.toString();
+  }
+
+  /// Search prompt 2/3: Education — schools, alumni pages, dean's lists.
+  static String buildSearchPromptEducation({
+    required String donorName,
+    required String employer,
+    required String jobTitle,
+    required String affiliation,
+    Map<String, dynamic>? linkedInIdentity,
+  }) {
+    final buf = StringBuffer();
+    buf.writeln('Search the web for "$donorName" — focus on EDUCATION and ACADEMIC life.');
+    buf.writeln();
+    buf.writeln(_buildCharacterBlock(
+      donorName: donorName, employer: employer,
+      jobTitle: jobTitle, affiliation: affiliation,
+      linkedInIdentity: linkedInIdentity,
+    ));
+
+    final profile = _extractProfileLists(linkedInIdentity);
+
+    buf.writeln();
+    buf.writeln('REQUIRED SEARCHES:');
+    int n = 1;
+    for (final school in profile.schools) {
+      buf.writeln('$n. "$donorName $school" — alumni pages, dean\'s lists, commencement programs, class notes, campus news');
+      n++;
+    }
+    if (!profile.schools.any((s) => s.toLowerCase().contains('northwestern'))) {
+      buf.writeln('$n. "$donorName Northwestern University" — alumni pages, donor recognition, event mentions');
+      n++;
+    }
+    if (n == 1) {
+      // No schools known — do a general education search
+      buf.writeln('1. "$donorName university OR college OR alumni" — any educational background');
+      buf.writeln('2. "$donorName Northwestern University" — alumni pages, donor recognition');
+    }
+
+    buf.writeln();
+    buf.writeln('Perform a SEPARATE web search for EACH item. Do not skip any.');
+    buf.writeln('Only return excerpts relevant to education, academic achievements, and alumni activities.');
+    buf.writeln();
+    buf.writeln(_buildSearchRules());
+    return buf.toString();
+  }
+
+  /// Search prompt 3/3: Personal — philanthropy, boards, hobbies, community.
+  static String buildSearchPromptPersonal({
+    required String donorName,
+    required String employer,
+    required String jobTitle,
+    required String affiliation,
+    Map<String, dynamic>? linkedInIdentity,
+  }) {
+    final buf = StringBuffer();
+    buf.writeln('Search the web for "$donorName" — focus on PERSONAL life, PHILANTHROPY, and COMMUNITY involvement.');
+    buf.writeln();
+    buf.writeln(_buildCharacterBlock(
+      donorName: donorName, employer: employer,
+      jobTitle: jobTitle, affiliation: affiliation,
+      linkedInIdentity: linkedInIdentity,
+    ));
+
+    buf.writeln();
+    buf.writeln('REQUIRED SEARCHES:');
+    buf.writeln('1. Board memberships, nonprofit involvement, or industry affiliations for "$donorName"');
+    buf.writeln('2. Personal interests, hobbies, community involvement, social mentions for "$donorName"');
+    buf.writeln('3. Any other pages with substantive biographical information about "$donorName"');
+
+    buf.writeln();
+    buf.writeln('Perform a SEPARATE web search for EACH item. Do not skip any.');
+    buf.writeln('Only return excerpts relevant to philanthropy, boards, personal interests, community, and hobbies.');
+    buf.writeln('Do NOT return career/employer or education results — those are covered separately.');
+    buf.writeln();
+    buf.writeln(_buildSearchRules());
+    return buf.toString();
+  }
+
+  /// Parses Step 1 output into a list of raw excerpts, deduplicated by URL.
   static List<SearchExcerpt> parseSearchResult(String text) {
     final json = _parseJson(text);
     final found = json['found'];
     if (found == false) return [];
 
     final raw = json['excerpts'] as List? ?? [];
-    return raw
-        .whereType<Map<String, dynamic>>()
-        .where((e) =>
-            (e['url']?.toString() ?? '').isNotEmpty &&
-            (e['text']?.toString() ?? '').isNotEmpty)
-        .map((e) => SearchExcerpt(
-              url: e['url'].toString(),
-              title: (e['title'] ?? e['url']).toString(),
-              text: e['text'].toString(),
-            ))
-        .toList();
+    final seen = <String>{};
+    final results = <SearchExcerpt>[];
+    for (final e in raw.whereType<Map<String, dynamic>>()) {
+      final url = (e['url']?.toString() ?? '').trim();
+      final txt = (e['text']?.toString() ?? '').trim();
+      if (url.isEmpty || txt.isEmpty) continue;
+      // Normalise URL for dedup: strip trailing slashes, fragments, query strings
+      final normUrl = url.split('?').first.split('#').first.replaceAll(RegExp(r'/+$'), '').toLowerCase();
+      // Also dedup by title to catch same page with slightly different URLs
+      final normTitle = (e['title'] ?? '').toString().trim().toLowerCase();
+      if (seen.contains(normUrl) || (normTitle.isNotEmpty && seen.contains('t:$normTitle'))) continue;
+      seen.add(normUrl);
+      if (normTitle.isNotEmpty) seen.add('t:$normTitle');
+      results.add(SearchExcerpt(
+        url: url,
+        title: (e['title'] ?? url).toString(),
+        text: txt,
+      ));
+    }
+    return results;
   }
 
   // ── Step 2: Verification ────────────────────────────────────────────────
@@ -246,6 +333,8 @@ class BioPrompt {
     buf.writeln('- "This source is from University of Michigan, which is not Northwestern, so it\'s probably a different person." ← WRONG — check the character profile first!');
     buf.writeln('- "This mentions an employer not in our records, so this is a different person." ← WRONG — check ALL employers in the character profile, not just the current one.');
     buf.writeln('- "This dean\'s list says Communication Studies but LinkedIn says Nonprofit Leadership, so it\'s a different person." ← WRONG — people often have multiple majors, minors, certificates, or change programs. Same name + same school + overlapping dates = same person. A mismatched field of study is NOT grounds for exclusion.');
+    buf.writeln('- "This says U of I but our profile says University of Iowa, so it must be University of Illinois." ← WRONG — resolve ambiguous abbreviations (U of I, UMich, NU, etc.) in FAVOR of the character profile. If the profile shows University of Iowa, then "U of I" almost certainly means University of Iowa, not Illinois.');
+    buf.writeln('- "This says Communications but the profile says Communication Studies." ← WRONG — treat near-synonym field names (Communications / Communication Studies / Media Studies, etc.) as matching.');
     buf.writeln();
     buf.writeln('In short: the character profile tells you everywhere this person has been. If a source matches ANY part of their profile (any employer, any school, any location, any role), it is likely the same person. Only exclude sources that clearly describe a DIFFERENT person (different career field, different city, different age/era). When in doubt, KEEP the source.');
     buf.writeln();
