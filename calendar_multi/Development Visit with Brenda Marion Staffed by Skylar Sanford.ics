@@ -1,0 +1,115 @@
+BEGIN:VCALENDAR
+PRODID:-//Microsoft Corporation//Outlook 16.0 MIMEDIR//EN
+VERSION:2.0
+METHOD:PUBLISH
+X-MS-OLK-FORCEINSPECTOROPEN:TRUE
+BEGIN:VTIMEZONE
+TZID:Central Standard Time
+BEGIN:STANDARD
+DTSTART:16011104T020000
+RRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=11
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0600
+END:STANDARD
+BEGIN:DAYLIGHT
+DTSTART:16010311T020000
+RRULE:FREQ=YEARLY;BYDAY=2SU;BYMONTH=3
+TZOFFSETFROM:-0600
+TZOFFSETTO:-0500
+END:DAYLIGHT
+END:VTIMEZONE
+BEGIN:VEVENT
+CLASS:PUBLIC
+CREATED:20260408T214432Z
+DESCRIPTION:Skylar Sanford is inviting you to a scheduled Zoom meeting. \n\
+	nTopic: Skylar Sanford's Personal Meeting Room\nJoin Zoom Meeting\nhttps:/
+	/northwestern.zoom.us/j/5457626756\n\nMeeting ID: 545 762 6756\n\n---\n\nO
+	ne tap mobile\n+13092053325\,\,5457626756# US\n+13126266799\,\,5457626756#
+	 US (Chicago)\n\n---\n\nJoin by SIP\n• 5457626756@zoomcrc.com\n\nJoin in
+	structions\nhttps://northwestern.zoom.us/meetings/5457626756/invitations?s
+	ignature=TaHrbA7rG96fRqAdKmhTZHklP_4OptxaL6CfHVJgub0\n\n\n
+DTEND;TZID="Central Standard Time":20260410T090000
+DTSTAMP:20260408T214432Z
+DTSTART;TZID="Central Standard Time":20260410T083000
+LAST-MODIFIED:20260408T214432Z
+LOCATION:https://northwestern.zoom.us/j/5457626756
+PRIORITY:5
+SEQUENCE:0
+SUMMARY;LANGUAGE=en-us:Development Visit with Brenda Marion\, Staffed by Sk
+	ylar Sanford
+TRANSP:OPAQUE
+UID:040000008200E00074C5B7101A82E00800000000B40408859FC7DC01000000000000000
+	010000000B219F9F759695C43BF306D77358C7FFE
+X-ALT-DESC;FMTTYPE=text/html:<html>\n<head>\n\n</head>\n<body>\n<span style
+	="font-family: Aptos\, Aptos_EmbeddedFont\, Aptos_MSFontService\, Calibri\
+	, Helvetica\, sans-serif\; font-size: 12pt\; color: rgb(0\, 0\, 0)\;">Skyl
+	ar Sanford is inviting you to a scheduled Zoom meeting.</span>\n<div class
+	="elementToProof" style="font-family: Aptos\, Aptos_EmbeddedFont\, Aptos_M
+	SFontService\, Calibri\, Helvetica\, sans-serif\; font-size: 12pt\; color:
+	 rgb(0\, 0\, 0)\;">\n<br>\n</div>\n<div class="elementToProof" style="font
+	-family: Aptos\, Aptos_EmbeddedFont\, Aptos_MSFontService\, Calibri\, Helv
+	etica\, sans-serif\; font-size: 12pt\; color: rgb(0\, 0\, 0)\;">\nTopic: S
+	kylar Sanford's Personal Meeting Room</div>\n<div class="elementToProof" s
+	tyle="font-family: Aptos\, Aptos_EmbeddedFont\, Aptos_MSFontService\, Cali
+	bri\, Helvetica\, sans-serif\; font-size: 12pt\; color: rgb(0\, 0\, 0)\;">
+	\nJoin Zoom Meeting</div>\n<div class="elementToProof" style="font-family:
+	 Aptos\, Aptos_EmbeddedFont\, Aptos_MSFontService\, Calibri\, Helvetica\, 
+	sans-serif\; font-size: 12pt\; color: rgb(0\, 0\, 0)\;">\nhttps://northwes
+	tern.zoom.us/j/5457626756</div>\n<div class="elementToProof" style="font-f
+	amily: Aptos\, Aptos_EmbeddedFont\, Aptos_MSFontService\, Calibri\, Helvet
+	ica\, sans-serif\; font-size: 12pt\; color: rgb(0\, 0\, 0)\;">\n<br>\n</di
+	v>\n<div class="elementToProof" style="font-family: Aptos\, Aptos_Embedded
+	Font\, Aptos_MSFontService\, Calibri\, Helvetica\, sans-serif\; font-size:
+	 12pt\; color: rgb(0\, 0\, 0)\;">\nMeeting ID: 545 762 6756</div>\n<div cl
+	ass="elementToProof" style="font-family: Aptos\, Aptos_EmbeddedFont\, Apto
+	s_MSFontService\, Calibri\, Helvetica\, sans-serif\; font-size: 12pt\; col
+	or: rgb(0\, 0\, 0)\;">\n<br>\n</div>\n<div class="elementToProof" style="f
+	ont-family: Aptos\, Aptos_EmbeddedFont\, Aptos_MSFontService\, Calibri\, H
+	elvetica\, sans-serif\; font-size: 12pt\; color: rgb(0\, 0\, 0)\;">\n---</
+	div>\n<div class="elementToProof" style="font-family: Aptos\, Aptos_Embedd
+	edFont\, Aptos_MSFontService\, Calibri\, Helvetica\, sans-serif\; font-siz
+	e: 12pt\; color: rgb(0\, 0\, 0)\;">\n<br>\n</div>\n<div class="elementToPr
+	oof" style="font-family: Aptos\, Aptos_EmbeddedFont\, Aptos_MSFontService\
+	, Calibri\, Helvetica\, sans-serif\; font-size: 12pt\; color: rgb(0\, 0\, 
+	0)\;">\nOne tap mobile</div>\n<div class="elementToProof" style="font-fami
+	ly: Aptos\, Aptos_EmbeddedFont\, Aptos_MSFontService\, Calibri\, Helvetica
+	\, sans-serif\; font-size: 12pt\; color: rgb(0\, 0\, 0)\;">\n+13092053325\
+	,\,5457626756# US</div>\n<div class="elementToProof" style="font-family: A
+	ptos\, Aptos_EmbeddedFont\, Aptos_MSFontService\, Calibri\, Helvetica\, sa
+	ns-serif\; font-size: 12pt\; color: rgb(0\, 0\, 0)\;">\n+13126266799\,\,54
+	57626756# US (Chicago)</div>\n<div class="elementToProof" style="font-fami
+	ly: Aptos\, Aptos_EmbeddedFont\, Aptos_MSFontService\, Calibri\, Helvetica
+	\, sans-serif\; font-size: 12pt\; color: rgb(0\, 0\, 0)\;">\n<br>\n</div>\
+	n<div class="elementToProof" style="font-family: Aptos\, Aptos_EmbeddedFon
+	t\, Aptos_MSFontService\, Calibri\, Helvetica\, sans-serif\; font-size: 12
+	pt\; color: rgb(0\, 0\, 0)\;">\n---</div>\n<div class="elementToProof" sty
+	le="font-family: Aptos\, Aptos_EmbeddedFont\, Aptos_MSFontService\, Calibr
+	i\, Helvetica\, sans-serif\; font-size: 12pt\; color: rgb(0\, 0\, 0)\;">\n
+	<br>\n</div>\n<div class="elementToProof" style="font-family: Aptos\, Apto
+	s_EmbeddedFont\, Aptos_MSFontService\, Calibri\, Helvetica\, sans-serif\; 
+	font-size: 12pt\; color: rgb(0\, 0\, 0)\;">\nJoin by SIP</div>\n<div class
+	="elementToProof" style="font-family: Aptos\, Aptos_EmbeddedFont\, Aptos_M
+	SFontService\, Calibri\, Helvetica\, sans-serif\; font-size: 12pt\; color:
+	 rgb(0\, 0\, 0)\;">\n• 5457626756@zoomcrc.com</div>\n<div class="element
+	ToProof" style="font-family: Aptos\, Aptos_EmbeddedFont\, Aptos_MSFontServ
+	ice\, Calibri\, Helvetica\, sans-serif\; font-size: 12pt\; color: rgb(0\, 
+	0\, 0)\;">\n<br>\n</div>\n<div class="elementToProof" style="font-family: 
+	Aptos\, Aptos_EmbeddedFont\, Aptos_MSFontService\, Calibri\, Helvetica\, s
+	ans-serif\; font-size: 12pt\; color: rgb(0\, 0\, 0)\;">\nJoin instructions
+	</div>\n<div class="elementToProof" style="font-family: Aptos\, Aptos_Embe
+	ddedFont\, Aptos_MSFontService\, Calibri\, Helvetica\, sans-serif\; font-s
+	ize: 12pt\; color: rgb(0\, 0\, 0)\;">\nhttps://northwestern.zoom.us/meetin
+	gs/5457626756/invitations?signature=TaHrbA7rG96fRqAdKmhTZHklP_4OptxaL6CfHV
+	Jgub0</div>\n<div class="elementToProof" style="font-family: Aptos\, Aptos
+	_EmbeddedFont\, Aptos_MSFontService\, Calibri\, Helvetica\, sans-serif\; f
+	ont-size: 12pt\; color: rgb(0\, 0\, 0)\;">\n<br>\n<br>\n</div>\n</body>\n<
+	/html>\n
+X-MICROSOFT-CDO-BUSYSTATUS:BUSY
+X-MICROSOFT-CDO-IMPORTANCE:1
+BEGIN:VALARM
+TRIGGER:-PT15M
+ACTION:DISPLAY
+DESCRIPTION:Reminder
+END:VALARM
+END:VEVENT
+END:VCALENDAR
