@@ -1,2 +1,1 @@
-# PrepSummaries
-Prep Summaries project for CS338 
+# PrepSummaries for college dean
