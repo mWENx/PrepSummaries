@@ -110,52 +110,48 @@ class EventDocxService {
   }
 
   // ── Fill a donor block ────────────────────────────────────────────────────
+  //
+  // Parse ALL paragraphs together so cross-paragraph merge fields
+  // (where begin is in one paragraph and separate/end in the next) are found.
 
   static String _fillDonorBlock(
     List<String> blockParas,
     Map<String, String> mergeFields,
     List<String> bioNotes,
   ) {
-    // Parse each paragraph, fill fields, handle bio
+    // Wrap all paragraphs in a single XML root so we can do cross-paragraph
+    // merge field replacement in one pass.
+    final allParasXml = blockParas.join('\n');
+    final doc = XmlDocument.parse(
+      '<?xml version="1.0"?>'
+      '<w:body xmlns:w="$_wNS"'
+      ' xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"'
+      ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+      ' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"'
+      ' xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">'
+      '$allParasXml'
+      '</w:body>',
+    );
+
+    // Cross-paragraph merge field replacement (handles fields that span paragraphs)
+    _replaceCrossParagraphMergeFields(doc.rootElement, mergeFields);
+
+    // Now handle the bio ListParagraph — find and replace it with bullets
+    _replaceBioFieldInBlock(doc.rootElement, bioNotes);
+
+    // Serialize each paragraph back
     final filled = <String>[];
-
-    for (int i = 0; i < blockParas.length; i++) {
-      final paraXml = blockParas[i];
-
-      // Check if this is the bio ListParagraph
-      if (paraXml.contains('Biographical_Information') &&
-          paraXml.contains('ListParagraph')) {
-        // Replace with bullet paragraphs for each bio note
-        if (bioNotes.isEmpty) {
-          // Keep an empty paragraph in place to preserve spacing
-          filled.add(_emptyListParagraph(paraXml));
-        } else {
-          for (final note in bioNotes) {
-            filled.add(_buildBulletParagraph(paraXml, note));
-          }
-        }
-        continue;
-      }
-
-      // Parse and fill merge fields
-      final doc = XmlDocument.parse(
-          '<?xml version="1.0"?><root xmlns:w="$_wNS" '
-          'xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml">'
-          '$paraXml</root>');
-      final para = doc.rootElement.childElements.first;
-      _fillMergeFieldsInPara(para, mergeFields);
-      filled.add(para.toXmlString());
+    for (final child in doc.rootElement.childElements) {
+      filled.add(child.toXmlString());
     }
-
     return filled.join('\n');
   }
 
-  // ── Merge field replacement (within a single paragraph) ───────────────────
+  // ── Cross-paragraph merge field replacement ────────────────────────────────
 
-  static void _fillMergeFieldsInPara(
-      XmlElement para, Map<String, String> mergeFields) {
-    // Handle fldChar begin..end sequences within this paragraph's runs
-    final allRuns = para.findAllElements('r', namespace: _wNS).toList();
+  static void _replaceCrossParagraphMergeFields(
+      XmlElement root, Map<String, String> mergeFields) {
+    final allRuns = root.findAllElements('r', namespace: _wNS).toList();
     if (allRuns.isEmpty) return;
 
     int i = 0;
@@ -176,10 +172,8 @@ class EventDocxService {
         if (fieldName == null) {
           final instrText = _getInstrText(r);
           if (instrText != null) {
-            // Strip formatting switches like \# "$#,##0"
-            final cleaned = instrText.replaceAll(r'\#', '').trim();
             final match =
-                RegExp(r'MERGEFIELD\s+"?([^\s"\\]+)"?').firstMatch(cleaned);
+                RegExp(r'MERGEFIELD\s+"?([^\s"\\]+)"?').firstMatch(instrText);
             if (match != null) fieldName = match.group(1);
           }
         }
@@ -266,6 +260,52 @@ class EventDocxService {
         '$pPrXml'
         '<w:r>$rPrXml<w:t xml:space="preserve">$escaped</w:t></w:r>'
         '</w:p>';
+  }
+
+  // ── Bio replacement on block root ────────────────────────────────────────
+
+  /// Finds the Biographical_Information ListParagraph within [root], captures
+  /// its formatting, removes it, and inserts one bullet paragraph per bio note.
+  static void _replaceBioFieldInBlock(
+      XmlElement root, List<String> bioNotes) {
+    XmlElement? bioPara;
+    for (final para
+        in root.childElements.where((e) => e.name.local == 'p')) {
+      final instrTexts = para
+          .findAllElements('instrText', namespace: _wNS)
+          .map((e) => e.innerText.trim())
+          .toList();
+      if (instrTexts.any((t) => t.contains('Biographical_Information'))) {
+        bioPara = para;
+        break;
+      }
+    }
+    if (bioPara == null) return;
+
+    final templateXml = bioPara.toXmlString();
+    final insertIdx = root.children.indexOf(bioPara);
+    root.children.remove(bioPara);
+
+    final insertions = <XmlNode>[];
+    if (bioNotes.isEmpty) {
+      final emptyXml = _emptyListParagraph(templateXml);
+      final emptyDoc = XmlDocument.parse(
+          '<?xml version="1.0"?><root xmlns:w="$_wNS">$emptyXml</root>');
+      insertions.add(emptyDoc.rootElement.childElements.first.copy());
+    } else {
+      for (final note in bioNotes) {
+        final bulletXml = _buildBulletParagraph(templateXml, note);
+        final bulletDoc = XmlDocument.parse(
+            '<?xml version="1.0"?><root xmlns:w="$_wNS"'
+            ' xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml">'
+            '$bulletXml</root>');
+        insertions.add(bulletDoc.rootElement.childElements.first.copy());
+      }
+    }
+
+    for (int i = insertions.length - 1; i >= 0; i--) {
+      root.children.insert(insertIdx, insertions[i]);
+    }
   }
 
   // ── Document structure helpers ────────────────────────────────────────────
